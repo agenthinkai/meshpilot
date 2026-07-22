@@ -1,0 +1,42 @@
+# ── Secrets — NEVER commit ───────────────────────────────────────────────────
+# .env holds SECRET_KEY, ADMIN_PASSWORD and the Grafana password.
+# .env.example is the safe template and IS committed.
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+infra/nginx/certs/
+
+# ── Models & data (large binaries / runtime state) ───────────────────────────
+models/
+data/
+*.gguf
+*.onnx
+*.safetensors
+*.bin
+*.pt
+*.pth
+*.db
+*.sqlite
+*.sqlite3
+
+# ── Python ───────────────────────────────────────────────────────────────────
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+env/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# ── Logs / OS / editor ───────────────────────────────────────────────────────
+*.log
+logs/
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
+*.swp

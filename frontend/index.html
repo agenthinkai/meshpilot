@@ -1,0 +1,299 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>MeshPilot — CPU-Only AI Inference Platform</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="/static/css/dashboard.css" />
+</head>
+<body>
+  <!-- Sidebar -->
+  <nav class="sidebar">
+    <div class="sidebar-logo">
+      <span class="logo-icon">⚡</span>
+      <span class="logo-text">MeshPilot</span>
+      <span class="logo-badge">CPU</span>
+    </div>
+    <ul class="nav-links">
+      <li><a href="#" class="nav-link active" data-page="dashboard">
+        <span class="nav-icon">📊</span> Dashboard
+      </a></li>
+      <li><a href="#" class="nav-link" data-page="demo">
+        <span class="nav-icon">🚀</span> Live Demo
+      </a></li>
+      <li><a href="#" class="nav-link" data-page="models">
+        <span class="nav-icon">🧠</span> Models
+      </a></li>
+      <li><a href="#" class="nav-link" data-page="apikeys">
+        <span class="nav-icon">🔑</span> API Keys
+      </a></li>
+      <li><a href="#" class="nav-link" data-page="docs">
+        <span class="nav-icon">📖</span> API Docs
+      </a></li>
+    </ul>
+    <div class="sidebar-footer">
+      <div class="cpu-badge" id="cpuBadge">Detecting CPU...</div>
+      <div class="user-info" id="userInfo">
+        <span id="userName">Not logged in</span>
+        <button class="btn-sm" id="logoutBtn" style="display:none">Logout</button>
+      </div>
+    </div>
+  </nav>
+
+  <!-- Main content -->
+  <main class="main-content">
+
+    <!-- ── Auth page ──────────────────────────────────────────────────────── -->
+    <div id="page-auth" class="page">
+      <div class="auth-container">
+        <div class="auth-card">
+          <h1>⚡ MeshPilot</h1>
+          <p class="auth-subtitle">CPU-Only AI Inference Platform</p>
+          <div class="tab-bar">
+            <button class="tab-btn active" data-tab="login">Login</button>
+            <button class="tab-btn" data-tab="signup">Sign Up</button>
+          </div>
+          <div id="tab-login" class="tab-content">
+            <input type="email" id="loginEmail" placeholder="Email" class="input-field" />
+            <input type="password" id="loginPassword" placeholder="Password" class="input-field" />
+            <button class="btn-primary full-width" onclick="login()">Login</button>
+          </div>
+          <div id="tab-signup" class="tab-content" style="display:none">
+            <input type="text" id="signupUsername" placeholder="Username" class="input-field" />
+            <input type="email" id="signupEmail" placeholder="Email" class="input-field" />
+            <input type="password" id="signupPassword" placeholder="Password (min 8 chars)" class="input-field" />
+            <button class="btn-primary full-width" onclick="signup()">Create Account</button>
+          </div>
+          <div id="authError" class="error-msg" style="display:none"></div>
+        </div>
+      </div>
+    </div>
+
+    <!-- ── Dashboard page ────────────────────────────────────────────────── -->
+    <div id="page-dashboard" class="page" style="display:none">
+      <div class="page-header">
+        <h2>Dashboard</h2>
+        <span class="header-sub">Real-time inference metrics</span>
+      </div>
+
+      <div class="stats-grid">
+        <div class="stat-card">
+          <div class="stat-label">Total Requests</div>
+          <div class="stat-value" id="statTotal">—</div>
+          <div class="stat-sub">all time</div>
+        </div>
+        <div class="stat-card">
+          <div class="stat-label">Requests (24h)</div>
+          <div class="stat-value" id="stat24h">—</div>
+          <div class="stat-sub">last 24 hours</div>
+        </div>
+        <div class="stat-card">
+          <div class="stat-label">Avg Latency</div>
+          <div class="stat-value" id="statLatency">—</div>
+          <div class="stat-sub">milliseconds</div>
+        </div>
+        <div class="stat-card">
+          <div class="stat-label">Throughput</div>
+          <div class="stat-value" id="statTPS">—</div>
+          <div class="stat-sub">tokens/second</div>
+        </div>
+        <div class="stat-card">
+          <div class="stat-label">Total Tokens</div>
+          <div class="stat-value" id="statTokens">—</div>
+          <div class="stat-sub">generated</div>
+        </div>
+        <div class="stat-card">
+          <div class="stat-label">Models Loaded</div>
+          <div class="stat-value" id="statModels">—</div>
+          <div class="stat-sub">available</div>
+        </div>
+      </div>
+
+      <div class="section-card">
+        <h3>CPU Profile</h3>
+        <div id="cpuProfile" class="cpu-profile-grid">Loading...</div>
+      </div>
+
+      <div class="section-card">
+        <h3>Recent Inferences</h3>
+        <table class="data-table" id="historyTable">
+          <thead>
+            <tr>
+              <th>ID</th><th>Model</th><th>Status</th>
+              <th>Latency</th><th>Tokens/s</th><th>Backend</th><th>Time</th>
+            </tr>
+          </thead>
+          <tbody id="historyBody"><tr><td colspan="7">Loading...</td></tr></tbody>
+        </table>
+      </div>
+    </div>
+
+    <!-- ── Live Demo page ────────────────────────────────────────────────── -->
+    <div id="page-demo" class="page" style="display:none">
+      <div class="page-header">
+        <h2>🚀 Live Demo</h2>
+        <span class="header-sub">Llama-3.2-1B-Instruct · INT4 · CPU-only</span>
+      </div>
+
+      <div class="demo-container">
+        <div class="demo-model-select">
+          <label>Model</label>
+          <select id="demoModel" class="input-field">
+            <option value="">Loading models...</option>
+          </select>
+        </div>
+
+        <div class="demo-params">
+          <div class="param-group">
+            <label>Max Tokens <span id="maxTokensVal">512</span></label>
+            <input type="range" id="maxTokens" min="64" max="2048" value="512"
+              oninput="document.getElementById('maxTokensVal').textContent=this.value" />
+          </div>
+          <div class="param-group">
+            <label>Temperature <span id="tempVal">0.7</span></label>
+            <input type="range" id="temperature" min="0" max="2" step="0.1" value="0.7"
+              oninput="document.getElementById('tempVal').textContent=this.value" />
+          </div>
+        </div>
+
+        <div class="prompt-area">
+          <label>Prompt</label>
+          <textarea id="demoPrompt" class="input-field" rows="5"
+            placeholder="Describe your startup idea in plain words...">Explain the key risks of a SaaS business targeting enterprise clients in three concise bullet points.</textarea>
+        </div>
+
+        <button class="btn-primary" id="runBtn" onclick="runDemo()">
+          ▶ Run Inference
+        </button>
+
+        <div class="response-area" id="responseArea" style="display:none">
+          <div class="response-header">
+            <span>Response</span>
+            <div class="response-meta" id="responseMeta"></div>
+          </div>
+          <pre class="response-text" id="responseText"></pre>
+        </div>
+      </div>
+    </div>
+
+    <!-- ── Models page ───────────────────────────────────────────────────── -->
+    <div id="page-models" class="page" style="display:none">
+      <div class="page-header">
+        <h2>🧠 Model Registry</h2>
+        <button class="btn-primary" onclick="showUploadModal()">+ Upload Model</button>
+      </div>
+
+      <div id="modelsList" class="models-grid">Loading...</div>
+
+      <!-- Upload modal -->
+      <div id="uploadModal" class="modal" style="display:none">
+        <div class="modal-content">
+          <h3>Upload Model</h3>
+          <p class="modal-sub">Supported: GGUF, ONNX, PyTorch (.pt, .bin, .safetensors)</p>
+          <input type="text" id="uploadName" placeholder="Model name" class="input-field" />
+          <input type="text" id="uploadDesc" placeholder="Description (optional)" class="input-field" />
+          <div class="file-drop" id="fileDrop" onclick="document.getElementById('fileInput').click()">
+            <input type="file" id="fileInput" accept=".gguf,.onnx,.pt,.pth,.bin,.safetensors"
+              onchange="handleFileSelect(this)" style="display:none" />
+            <span id="fileDropText">Click or drag to upload model file</span>
+          </div>
+          <div class="upload-progress" id="uploadProgress" style="display:none">
+            <div class="progress-bar"><div class="progress-fill" id="progressFill"></div></div>
+            <span id="progressText">Uploading...</span>
+          </div>
+          <div class="modal-actions">
+            <button class="btn-secondary" onclick="hideUploadModal()">Cancel</button>
+            <button class="btn-primary" onclick="uploadModel()">Upload & Quantize</button>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- ── API Keys page ─────────────────────────────────────────────────── -->
+    <div id="page-apikeys" class="page" style="display:none">
+      <div class="page-header">
+        <h2>🔑 API Keys</h2>
+        <button class="btn-primary" onclick="createAPIKey()">+ New Key</button>
+      </div>
+      <div class="section-card">
+        <p class="api-note">API keys are shown only once. Store them securely.</p>
+        <table class="data-table" id="apiKeysTable">
+          <thead>
+            <tr><th>Name</th><th>Prefix</th><th>Requests</th><th>Last Used</th><th>Action</th></tr>
+          </thead>
+          <tbody id="apiKeysBody"><tr><td colspan="5">Loading...</td></tr></tbody>
+        </table>
+      </div>
+      <div id="newKeyBanner" class="new-key-banner" style="display:none">
+        <strong>New API Key (copy now — shown once):</strong>
+        <code id="newKeyValue"></code>
+        <button onclick="copyKey()">Copy</button>
+      </div>
+    </div>
+
+    <!-- ── API Docs page ─────────────────────────────────────────────────── -->
+    <div id="page-docs" class="page" style="display:none">
+      <div class="page-header">
+        <h2>📖 API Reference</h2>
+        <a href="/api/docs" target="_blank" class="btn-secondary">Open Swagger UI ↗</a>
+      </div>
+      <div class="section-card">
+        <h3>Quick Start</h3>
+        <pre class="code-block">
+# 1. Get an API key from the API Keys page
+# 2. Run synchronous inference
+
+curl -X POST https://your-meshpilot.host/api/v1/inference/sync/{model_id} \
+  -H "X-API-Key: mp_your_key_here" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "prompt": "Explain CPU-only AI inference in one sentence.",
+    "max_tokens": 256,
+    "temperature": 0.7
+  }'
+
+# Response:
+{
+  "id": "abc123",
+  "status": "completed",
+  "text": "CPU-only AI inference runs large language models...",
+  "latency_ms": 2840.5,
+  "throughput_tps": 18.4,
+  "backend_used": "llamacpp"
+}
+        </pre>
+        <h3>Async Inference</h3>
+        <pre class="code-block">
+# Submit async job
+curl -X POST .../api/v1/inference/async/{model_id} \
+  -H "X-API-Key: mp_..." \
+  -d '{"prompt": "...", "webhook_url": "https://your-server/callback"}'
+
+# Returns immediately:
+{"task_id": "xyz789", "status": "pending", "poll_url": "/api/v1/inference/tasks/xyz789"}
+
+# Poll for result
+curl .../api/v1/inference/tasks/xyz789 -H "X-API-Key: mp_..."
+        </pre>
+        <h3>Model Upload</h3>
+        <pre class="code-block">
+# Upload a GGUF model (auto-quantized to INT4)
+curl -X POST .../api/v1/models \
+  -H "Authorization: Bearer {jwt_token}" \
+  -F "file=@./my-model.gguf" \
+  -F "name=My Custom Model" \
+  -F "description=Fine-tuned on domain data"
+
+# Check quantization status
+curl .../api/v1/models/{model_id} -H "Authorization: Bearer {jwt_token}"
+        </pre>
+      </div>
+    </div>
+
+  </main>
+
+  <script src="/static/js/app.js"></script>
+</body>
+</html>

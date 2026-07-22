@@ -1,0 +1,196 @@
+version: "3.9"
+
+# ─────────────────────────────────────────────────────────────────────────────
+# MeshPilot — CPU-Only AI Inference Platform
+# Single-node Docker Compose stack
+# ─────────────────────────────────────────────────────────────────────────────
+
+x-logging: &default-logging
+  driver: "json-file"
+  options:
+    max-size: "50m"
+    max-file: "5"
+
+services:
+
+  # ── Reverse Proxy ───────────────────────────────────────────────────────────
+  nginx:
+    image: nginx:1.25-alpine
+    container_name: meshpilot-nginx
+    # Host 80/443 are already taken by the existing agenthinkmesh.com stack
+    # (pitchproof-caddy-1). MeshPilot binds 8100 on the host instead; TLS and
+    # the public hostname are handled by that existing Caddy — see
+    # meshpilot-caddy.conf. Bind to 127.0.0.1 so 8100 is NOT reachable from the
+    # public internet: the only way in is via the reverse proxy.
+    ports:
+      - "127.0.0.1:8100:80"
+    volumes:
+      - ./infra/nginx/nginx.conf:/etc/nginx/nginx.conf:ro
+      - ./infra/nginx/certs:/etc/nginx/certs:ro
+      - nginx-logs:/var/log/nginx
+    depends_on:
+      - api
+    restart: unless-stopped
+    logging: *default-logging
+
+  # ── FastAPI Backend ─────────────────────────────────────────────────────────
+  api:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: meshpilot-api
+    environment:
+      - DATABASE_URL=sqlite+aiosqlite:////data/meshpilot.db   # BUGFIX: async driver required
+      - REDIS_URL=redis://redis:6379/0
+      - MODEL_STORAGE=/models
+      - SECRET_KEY=${SECRET_KEY:-changeme-in-production-32chars!!}
+      - PROMETHEUS_MULTIPROC_DIR=/tmp/prometheus
+      - LOG_LEVEL=${LOG_LEVEL:-info}
+      - WORKERS=${API_WORKERS:-4}
+    volumes:
+      - model-storage:/models
+      - sqlite-data:/data
+      - ./backend:/app:ro
+    depends_on:
+      - redis
+    restart: unless-stopped
+    logging: *default-logging
+    # CPU affinity hint — adjust to your NUMA topology
+    cpuset: "0-3"
+    mem_limit: "1g"          # was 12g — see README-DEPLOY.md "Memory"
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  # ── llama.cpp Inference Server ──────────────────────────────────────────────
+  llamacpp:
+    build:
+      context: ./infra/llamacpp
+      dockerfile: Dockerfile
+    container_name: meshpilot-llamacpp
+    environment:
+      - LLAMA_MODEL_DIR=/models
+      - LLAMA_HOST=0.0.0.0
+      - LLAMA_PORT=8080
+      - LLAMA_THREADS=${LLAMA_THREADS:-4}
+      - LLAMA_CTX_SIZE=${LLAMA_CTX_SIZE:-4096}
+      - LLAMA_BATCH_SIZE=${LLAMA_BATCH_SIZE:-512}
+    volumes:
+      - model-storage:/models:ro
+    restart: unless-stopped
+    logging: *default-logging
+    cpuset: "0-3"
+    mem_limit: "3g"          # was 10g — caps usable model size (~3B Q4)
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8080/health"]
+      interval: 30s
+      timeout: 15s
+      retries: 5
+
+  # ── ONNX Runtime Server ─────────────────────────────────────────────────────
+  onnx:
+    build:
+      context: ./infra/onnx
+      dockerfile: Dockerfile
+    container_name: meshpilot-onnx
+    environment:
+      - ONNX_MODEL_DIR=/models
+      - ONNX_HOST=0.0.0.0
+      - ONNX_PORT=8090
+      - ORT_NUM_THREADS=${ORT_NUM_THREADS:-4}
+      - ORT_INTER_OP_THREADS=${ORT_INTER_OP_THREADS:-2}
+    volumes:
+      - model-storage:/models:ro
+    restart: unless-stopped
+    logging: *default-logging
+    cpuset: "0-3"
+    mem_limit: "1g"          # was 10g
+
+  # ── Redis (task queue + caching) ────────────────────────────────────────────
+  redis:
+    image: redis:7.2-alpine
+    container_name: meshpilot-redis
+    command: redis-server --maxmemory 256mb --maxmemory-policy allkeys-lru --save 60 1000
+    volumes:
+      - redis-data:/data
+    restart: unless-stopped
+    logging: *default-logging
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+
+  # ── Celery Worker (async inference + quantization jobs) ─────────────────────
+  worker:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: meshpilot-worker
+    command: celery -A core.celery_app worker --loglevel=info --concurrency=2 -Q inference,quantize
+    environment:
+      - DATABASE_URL=sqlite+aiosqlite:////data/meshpilot.db   # BUGFIX: async driver required
+      - REDIS_URL=redis://redis:6379/0
+      - MODEL_STORAGE=/models
+      - SECRET_KEY=${SECRET_KEY:-changeme-in-production-32chars!!}
+      - LLAMACPP_URL=http://llamacpp:8080
+      - ONNX_URL=http://onnx:8090
+    volumes:
+      - model-storage:/models
+      - sqlite-data:/data
+      - ./backend:/app:ro
+    depends_on:
+      - redis
+      - llamacpp
+      - onnx
+    restart: unless-stopped
+    logging: *default-logging
+    cpuset: "0-3"
+    mem_limit: "768m"       # was 8g
+
+  # ── Prometheus ──────────────────────────────────────────────────────────────
+  prometheus:
+    image: prom/prometheus:v2.51.0
+    container_name: meshpilot-prometheus
+    command:
+      - "--config.file=/etc/prometheus/prometheus.yml"
+      - "--storage.tsdb.path=/prometheus"
+      - "--storage.tsdb.retention.time=30d"
+      - "--web.enable-lifecycle"
+    volumes:
+      - ./infra/prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - prometheus-data:/prometheus
+    restart: unless-stopped
+    logging: *default-logging
+
+  # ── Grafana ─────────────────────────────────────────────────────────────────
+  grafana:
+    image: grafana/grafana:10.4.0
+    container_name: meshpilot-grafana
+    environment:
+      - GF_SECURITY_ADMIN_PASSWORD=${GRAFANA_PASSWORD:-meshpilot}
+      - GF_USERS_ALLOW_SIGN_UP=false
+      - GF_SERVER_ROOT_URL=http://localhost/grafana
+      - GF_SERVER_SERVE_FROM_SUB_PATH=true
+    volumes:
+      - grafana-data:/var/lib/grafana
+      - ./infra/grafana/provisioning:/etc/grafana/provisioning:ro
+    depends_on:
+      - prometheus
+    restart: unless-stopped
+    logging: *default-logging
+
+volumes:
+  model-storage:
+    driver: local
+    driver_opts:
+      type: none
+      o: bind
+      device: ${MODEL_DIR:-/opt/meshpilot/models}   # must exist — deploy.sh creates it
+  sqlite-data:
+  redis-data:
+  prometheus-data:
+  grafana-data:
+  nginx-logs:
