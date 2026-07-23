@@ -40,7 +40,20 @@ while ($adminPassword.Length -lt 8) {
     }
 }
 
-# -- 3. Docker check ------------------------------------------------------------
+# -- 3. Git check ----------------------------------------------------------------
+if (-not (Get-Command git -ErrorAction SilentlyContinue)) {
+    Write-Host "Git not found. Installing Git for Windows..."
+    winget install --id Git.Git -e --silent --accept-package-agreements --accept-source-agreements
+    $gitCmdPath = "C:\Program Files\Git\cmd"
+    if (Test-Path $gitCmdPath) { $env:PATH = "$gitCmdPath;$env:PATH" }
+    if (-not (Get-Command git -ErrorAction SilentlyContinue)) {
+        Write-Host "Git installation did not complete. Please install Git manually from https://git-scm.com and run this installer again." -ForegroundColor Red
+        exit 1
+    }
+    Write-Host "Git installed."
+}
+
+# -- 4. Docker check ------------------------------------------------------------
 if (-not (Get-Command docker -ErrorAction SilentlyContinue)) {
     Write-Host "Installing Docker Desktop..."
     winget install Docker.DockerDesktop --silent --accept-package-agreements --accept-source-agreements
@@ -48,7 +61,7 @@ if (-not (Get-Command docker -ErrorAction SilentlyContinue)) {
     exit
 }
 
-# -- 4. Clone -------------------------------------------------------------------
+# -- 5. Clone -------------------------------------------------------------------
 $parent = Split-Path $installDir -Parent
 if ($parent -and -not (Test-Path $parent)) {
     New-Item -ItemType Directory -Path $parent -Force | Out-Null
@@ -66,7 +79,7 @@ if (-not (Test-Path $installDir)) {
 
 Set-Location $installDir
 
-# -- 5. Configure .env ----------------------------------------------------------
+# -- 6. Configure .env ----------------------------------------------------------
 Copy-Item .env.example .env -Force
 
 $secretKey = New-RandomHex64
@@ -84,7 +97,7 @@ $modelDirDocker = $modelDir -replace '\\', '/'
 Add-Content .env ""
 Add-Content .env "MODEL_DIR=$modelDirDocker"
 
-# -- 6. Start ---------------------------------------------------------------
+# -- 7. Start ---------------------------------------------------------------
 Write-Host ""
 Write-Host "Building and starting MeshPilot (this can take several minutes on first run)..." -ForegroundColor Cyan
 docker compose up -d --build

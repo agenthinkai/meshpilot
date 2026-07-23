@@ -140,6 +140,19 @@ $jobScript = {
         -join ($bytes | ForEach-Object { $_.ToString("x2") })
     }
 
+    if (-not (Get-Command git -ErrorAction SilentlyContinue)) {
+        Write-Output "Git not found. Installing Git for Windows..."
+        winget install --id Git.Git -e --silent --accept-package-agreements --accept-source-agreements
+        $gitCmdPath = "C:\Program Files\Git\cmd"
+        if (Test-Path $gitCmdPath) { $env:PATH = "$gitCmdPath;$env:PATH" }
+        if (-not (Get-Command git -ErrorAction SilentlyContinue)) {
+            throw "Git installation did not complete. Please install Git manually from https://git-scm.com and run this installer again."
+        }
+        Write-Output "Git installed."
+    } else {
+        Write-Output "Git is already installed."
+    }
+
     if (-not (Get-Command docker -ErrorAction SilentlyContinue)) {
         Write-Output "Docker not found. Installing Docker Desktop..."
         winget install Docker.DockerDesktop --silent --accept-package-agreements --accept-source-agreements
