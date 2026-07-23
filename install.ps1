@@ -22,6 +22,11 @@ function Test-IsAdmin {
     $principal.IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)
 }
 
+function Test-DockerRunning {
+    docker info 2>&1 | Out-Null
+    $LASTEXITCODE -eq 0
+}
+
 Write-Host "===== MeshPilot Installer =====" -ForegroundColor Cyan
 Write-Host ""
 
@@ -89,6 +94,29 @@ if (-not (Get-Command docker -ErrorAction SilentlyContinue)) {
     winget install Docker.DockerDesktop --silent --accept-package-agreements --accept-source-agreements
     Write-Host "Docker installed. Restart your computer and run this installer again."
     exit
+}
+
+if (-not (Test-DockerRunning)) {
+    Write-Host "Docker Desktop is installed but not running. Starting it..." -ForegroundColor Cyan
+    $dockerExe = "C:\Program Files\Docker\Docker\Docker Desktop.exe"
+    if (Test-Path $dockerExe) {
+        Start-Process $dockerExe | Out-Null
+    }
+    $deadline = (Get-Date).AddSeconds(90)
+    $lastNotice = Get-Date
+    while ((Get-Date) -lt $deadline -and -not (Test-DockerRunning)) {
+        Start-Sleep -Seconds 3
+        if (((Get-Date) - $lastNotice).TotalSeconds -ge 15) {
+            Write-Host "Still waiting for Docker Desktop to finish starting..." -ForegroundColor Cyan
+            $lastNotice = Get-Date
+        }
+    }
+    if (-not (Test-DockerRunning)) {
+        Write-Host "Docker Desktop did not finish starting within 90 seconds." -ForegroundColor Red
+        Write-Host "Please open Docker Desktop manually, wait until it shows the engine as running, then run this installer again." -ForegroundColor Red
+        exit 1
+    }
+    Write-Host "Docker engine is now running."
 }
 
 # -- 5. Clone -------------------------------------------------------------------

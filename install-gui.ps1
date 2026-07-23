@@ -13,6 +13,11 @@ function Test-IsAdmin {
     $principal.IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)
 }
 
+function Test-DockerRunning {
+    docker info 2>&1 | Out-Null
+    $LASTEXITCODE -eq 0
+}
+
 # -- Form -----------------------------------------------------------------------
 $form = New-Object System.Windows.Forms.Form
 $form.Text = "MeshPilot Installer"
@@ -54,7 +59,7 @@ $chkDocker.Text = "Docker"
 $chkDocker.Location = New-Object System.Drawing.Point(260, 70)
 $chkDocker.AutoSize = $true
 $chkDocker.Enabled = $false
-$chkDocker.Checked = [bool](Get-Command docker -ErrorAction SilentlyContinue)
+$chkDocker.Checked = [bool](Get-Command docker -ErrorAction SilentlyContinue) -and (Test-DockerRunning)
 
 $lblFolder = New-Object System.Windows.Forms.Label
 $lblFolder.Text = "Install folder:"
@@ -207,6 +212,11 @@ $jobScript = {
         $principal.IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)
     }
 
+    function Test-DockerRunning {
+        docker info 2>&1 | Out-Null
+        $LASTEXITCODE -eq 0
+    }
+
     Write-Output "PROGRESS:5"
 
     if (-not (Get-Command git -ErrorAction SilentlyContinue)) {
@@ -237,6 +247,27 @@ $jobScript = {
         return
     }
     Write-Output "Docker is already installed."
+
+    if (-not (Test-DockerRunning)) {
+        Write-Output "Docker Desktop is installed but not running. Starting it..."
+        $dockerExe = "C:\Program Files\Docker\Docker\Docker Desktop.exe"
+        if (Test-Path $dockerExe) {
+            Start-Process $dockerExe | Out-Null
+        }
+        $deadline = (Get-Date).AddSeconds(90)
+        $lastNotice = Get-Date
+        while ((Get-Date) -lt $deadline -and -not (Test-DockerRunning)) {
+            Start-Sleep -Seconds 3
+            if (((Get-Date) - $lastNotice).TotalSeconds -ge 15) {
+                Write-Output "Still waiting for Docker Desktop to finish starting..."
+                $lastNotice = Get-Date
+            }
+        }
+        if (-not (Test-DockerRunning)) {
+            throw "Docker Desktop did not finish starting within 90 seconds. Please open Docker Desktop manually from the Start menu, wait until it shows the engine as running, then click Install again."
+        }
+        Write-Output "Docker engine is now running."
+    }
     Write-Output "DOCKER_READY"
     Write-Output "PROGRESS:30"
 
