@@ -16,8 +16,21 @@ function Read-PlainText([System.Security.SecureString]$secure) {
     finally { [System.Runtime.InteropServices.Marshal]::ZeroFreeBSTR($bstr) }
 }
 
+function Test-IsAdmin {
+    $identity = [Security.Principal.WindowsIdentity]::GetCurrent()
+    $principal = New-Object Security.Principal.WindowsPrincipal($identity)
+    $principal.IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)
+}
+
 Write-Host "===== MeshPilot Installer =====" -ForegroundColor Cyan
 Write-Host ""
+
+if (-not (Test-IsAdmin)) {
+    Write-Host "Note: this window is not running as Administrator." -ForegroundColor Yellow
+    Write-Host "That's fine if Git and Docker are already installed. If either needs to be" -ForegroundColor Yellow
+    Write-Host "installed, right-click install.bat and choose 'Run as administrator', then try again." -ForegroundColor Yellow
+    Write-Host ""
+}
 
 # -- 1. Install folder --------------------------------------------------------
 $defaultDir = Join-Path $HOME "meshpilot"
@@ -49,6 +62,11 @@ while (-not [int]::TryParse($portText, [ref]$port) -or $port -lt 1 -or $port -gt
 
 # -- 3. Git check ----------------------------------------------------------------
 if (-not (Get-Command git -ErrorAction SilentlyContinue)) {
+    if (-not (Test-IsAdmin)) {
+        Write-Host "Git needs to be installed, which requires Administrator rights." -ForegroundColor Red
+        Write-Host "Right-click install.bat, choose 'Run as administrator', and try again." -ForegroundColor Red
+        exit 1
+    }
     Write-Host "Git not found. Installing Git for Windows..."
     winget install --id Git.Git -e --silent --accept-package-agreements --accept-source-agreements
     $gitCmdPath = "C:\Program Files\Git\cmd"
@@ -62,6 +80,11 @@ if (-not (Get-Command git -ErrorAction SilentlyContinue)) {
 
 # -- 4. Docker check ------------------------------------------------------------
 if (-not (Get-Command docker -ErrorAction SilentlyContinue)) {
+    if (-not (Test-IsAdmin)) {
+        Write-Host "Docker needs to be installed, which requires Administrator rights." -ForegroundColor Red
+        Write-Host "Right-click install.bat, choose 'Run as administrator', and try again." -ForegroundColor Red
+        exit 1
+    }
     Write-Host "Installing Docker Desktop..."
     winget install Docker.DockerDesktop --silent --accept-package-agreements --accept-source-agreements
     Write-Host "Docker installed. Restart your computer and run this installer again."

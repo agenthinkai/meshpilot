@@ -7,6 +7,12 @@ Add-Type -AssemblyName System.Windows.Forms
 Add-Type -AssemblyName System.Drawing
 [System.Windows.Forms.Application]::EnableVisualStyles()
 
+function Test-IsAdmin {
+    $identity = [Security.Principal.WindowsIdentity]::GetCurrent()
+    $principal = New-Object Security.Principal.WindowsPrincipal($identity)
+    $principal.IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)
+}
+
 # -- Form -----------------------------------------------------------------------
 $form = New-Object System.Windows.Forms.Form
 $form.Text = "MeshPilot Installer"
@@ -22,69 +28,78 @@ $lblTitle.Font = New-Object System.Drawing.Font("Segoe UI", 14, [System.Drawing.
 $lblTitle.Location = New-Object System.Drawing.Point(20, 15)
 $lblTitle.AutoSize = $true
 
+$lblAdminNote = New-Object System.Windows.Forms.Label
+$lblAdminNote.Location = New-Object System.Drawing.Point(20, 46)
+$lblAdminNote.Size = New-Object System.Drawing.Size(500, 16)
+$lblAdminNote.Font = New-Object System.Drawing.Font("Segoe UI", 8)
+$lblAdminNote.ForeColor = [System.Drawing.Color]::DarkOrange
+if (-not (Test-IsAdmin)) {
+    $lblAdminNote.Text = "Not running as Administrator - only needed if Git/Docker still need installing."
+}
+
 $lblFolder = New-Object System.Windows.Forms.Label
 $lblFolder.Text = "Install folder:"
-$lblFolder.Location = New-Object System.Drawing.Point(20, 60)
+$lblFolder.Location = New-Object System.Drawing.Point(20, 84)
 $lblFolder.AutoSize = $true
 
 $txtFolder = New-Object System.Windows.Forms.TextBox
-$txtFolder.Location = New-Object System.Drawing.Point(20, 82)
+$txtFolder.Location = New-Object System.Drawing.Point(20, 106)
 $txtFolder.Size = New-Object System.Drawing.Size(400, 25)
 $txtFolder.Text = Join-Path $HOME "meshpilot"
 
 $btnBrowse = New-Object System.Windows.Forms.Button
 $btnBrowse.Text = "Browse..."
-$btnBrowse.Location = New-Object System.Drawing.Point(430, 81)
+$btnBrowse.Location = New-Object System.Drawing.Point(430, 105)
 $btnBrowse.Size = New-Object System.Drawing.Size(90, 25)
 
 $lblEmail = New-Object System.Windows.Forms.Label
 $lblEmail.Text = "Admin email:"
-$lblEmail.Location = New-Object System.Drawing.Point(20, 120)
+$lblEmail.Location = New-Object System.Drawing.Point(20, 144)
 $lblEmail.AutoSize = $true
 
 $txtEmail = New-Object System.Windows.Forms.TextBox
-$txtEmail.Location = New-Object System.Drawing.Point(20, 142)
+$txtEmail.Location = New-Object System.Drawing.Point(20, 166)
 $txtEmail.Size = New-Object System.Drawing.Size(500, 25)
 
 $lblPass = New-Object System.Windows.Forms.Label
 $lblPass.Text = "Admin password (min 8 characters):"
-$lblPass.Location = New-Object System.Drawing.Point(20, 180)
+$lblPass.Location = New-Object System.Drawing.Point(20, 204)
 $lblPass.AutoSize = $true
 
 $txtPass = New-Object System.Windows.Forms.TextBox
-$txtPass.Location = New-Object System.Drawing.Point(20, 202)
+$txtPass.Location = New-Object System.Drawing.Point(20, 226)
 $txtPass.Size = New-Object System.Drawing.Size(500, 25)
 $txtPass.UseSystemPasswordChar = $true
 
 $lblPass2 = New-Object System.Windows.Forms.Label
 $lblPass2.Text = "Confirm password:"
-$lblPass2.Location = New-Object System.Drawing.Point(20, 238)
+$lblPass2.Location = New-Object System.Drawing.Point(20, 262)
 $lblPass2.AutoSize = $true
 
 $txtPass2 = New-Object System.Windows.Forms.TextBox
-$txtPass2.Location = New-Object System.Drawing.Point(20, 260)
+$txtPass2.Location = New-Object System.Drawing.Point(20, 284)
 $txtPass2.Size = New-Object System.Drawing.Size(500, 25)
 $txtPass2.UseSystemPasswordChar = $true
 
 $lblPort = New-Object System.Windows.Forms.Label
 $lblPort.Text = "Local port (default 8100):"
-$lblPort.Location = New-Object System.Drawing.Point(20, 296)
+$lblPort.Location = New-Object System.Drawing.Point(20, 320)
 $lblPort.AutoSize = $true
 
 $txtPort = New-Object System.Windows.Forms.TextBox
-$txtPort.Location = New-Object System.Drawing.Point(20, 318)
+$txtPort.Location = New-Object System.Drawing.Point(20, 342)
 $txtPort.Size = New-Object System.Drawing.Size(100, 25)
 $txtPort.Text = "8100"
 
 $lblPortHint = New-Object System.Windows.Forms.Label
 $lblPortHint.Text = "MeshPilot will open at http://localhost:<port>"
-$lblPortHint.Location = New-Object System.Drawing.Point(130, 322)
+$lblPortHint.Location = New-Object System.Drawing.Point(130, 346)
 $lblPortHint.AutoSize = $true
 $lblPortHint.ForeColor = [System.Drawing.Color]::Gray
 
 $btnInstall = New-Object System.Windows.Forms.Button
 $btnInstall.Text = "Install"
-$btnInstall.Location = New-Object System.Drawing.Point(20, 356)
+$btnInstall.Location = New-Object System.Drawing.Point(20, 380)
 $btnInstall.Size = New-Object System.Drawing.Size(120, 36)
 $btnInstall.BackColor = [System.Drawing.Color]::FromArgb(37, 99, 235)
 $btnInstall.ForeColor = [System.Drawing.Color]::White
@@ -92,13 +107,13 @@ $btnInstall.FlatStyle = "Flat"
 
 $btnCancel = New-Object System.Windows.Forms.Button
 $btnCancel.Text = "Cancel"
-$btnCancel.Location = New-Object System.Drawing.Point(150, 356)
+$btnCancel.Location = New-Object System.Drawing.Point(150, 380)
 $btnCancel.Size = New-Object System.Drawing.Size(100, 36)
 $btnCancel.Enabled = $false
 
 $lblStatus = New-Object System.Windows.Forms.Label
 $lblStatus.Text = ""
-$lblStatus.Location = New-Object System.Drawing.Point(265, 366)
+$lblStatus.Location = New-Object System.Drawing.Point(265, 390)
 $lblStatus.AutoSize = $true
 
 $progress = New-Object System.Windows.Forms.ProgressBar
@@ -106,21 +121,21 @@ $progress.Style = "Blocks"
 $progress.Minimum = 0
 $progress.Maximum = 100
 $progress.Value = 0
-$progress.Location = New-Object System.Drawing.Point(20, 404)
+$progress.Location = New-Object System.Drawing.Point(20, 428)
 $progress.Size = New-Object System.Drawing.Size(500, 20)
 
 $txtLog = New-Object System.Windows.Forms.TextBox
 $txtLog.Multiline = $true
 $txtLog.ScrollBars = "Vertical"
 $txtLog.ReadOnly = $true
-$txtLog.Location = New-Object System.Drawing.Point(20, 434)
+$txtLog.Location = New-Object System.Drawing.Point(20, 458)
 $txtLog.Size = New-Object System.Drawing.Size(500, 150)
 $txtLog.Font = New-Object System.Drawing.Font("Consolas", 8.5)
 $txtLog.BackColor = [System.Drawing.Color]::FromArgb(30, 30, 30)
 $txtLog.ForeColor = [System.Drawing.Color]::FromArgb(220, 220, 220)
 
 $form.Controls.AddRange(@(
-    $lblTitle, $lblFolder, $txtFolder, $btnBrowse,
+    $lblTitle, $lblAdminNote, $lblFolder, $txtFolder, $btnBrowse,
     $lblEmail, $txtEmail, $lblPass, $txtPass, $lblPass2, $txtPass2,
     $lblPort, $txtPort, $lblPortHint,
     $btnInstall, $btnCancel, $lblStatus, $progress, $txtLog
@@ -166,9 +181,18 @@ $jobScript = {
         -join ($bytes | ForEach-Object { $_.ToString("x2") })
     }
 
+    function Test-IsAdmin {
+        $identity = [Security.Principal.WindowsIdentity]::GetCurrent()
+        $principal = New-Object Security.Principal.WindowsPrincipal($identity)
+        $principal.IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)
+    }
+
     Write-Output "PROGRESS:5"
 
     if (-not (Get-Command git -ErrorAction SilentlyContinue)) {
+        if (-not (Test-IsAdmin)) {
+            throw "Git needs to be installed, which requires Administrator rights. Close this installer, right-click install.bat, choose 'Run as administrator', and try again."
+        }
         Write-Output "Git not found. Installing Git for Windows..."
         winget install --id Git.Git -e --silent --accept-package-agreements --accept-source-agreements
         $gitCmdPath = "C:\Program Files\Git\cmd"
@@ -183,6 +207,9 @@ $jobScript = {
     Write-Output "PROGRESS:15"
 
     if (-not (Get-Command docker -ErrorAction SilentlyContinue)) {
+        if (-not (Test-IsAdmin)) {
+            throw "Docker needs to be installed, which requires Administrator rights. Close this installer, right-click install.bat, choose 'Run as administrator', and try again."
+        }
         Write-Output "Docker not found. Installing Docker Desktop..."
         winget install Docker.DockerDesktop --silent --accept-package-agreements --accept-source-agreements
         Write-Output "DOCKER_INSTALLED_NEEDS_RESTART"
