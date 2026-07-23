@@ -1,10 +1,16 @@
-"""Seed the database with the pre-loaded demo model record."""
+"""Seed the database with the pre-loaded demo model record and bootstrap admin."""
 
 from __future__ import annotations
 
 import logging
+import re
 from sqlalchemy import select
-from core.database import AsyncSessionLocal, ModelFormat, ModelRecord, ModelStatus, QuantBits
+from core.config import settings
+from core.database import (
+    AsyncSessionLocal, ModelFormat, ModelRecord, ModelStatus, QuantBits,
+    User, UserRole, UserTier,
+)
+from core.security import hash_password
 
 logger = logging.getLogger("meshpilot.seed")
 
@@ -46,3 +52,32 @@ async def seed_demo_models() -> None:
             logger.info(f"Seeded demo model: {model_data['slug']}")
 
         await session.commit()
+
+
+async def seed_admin_user() -> None:
+    """Create the admin account from ADMIN_EMAIL/ADMIN_PASSWORD on first startup, if configured."""
+    if not settings.ADMIN_EMAIL or not settings.ADMIN_PASSWORD:
+        return
+
+    async with AsyncSessionLocal() as session:
+        result = await session.execute(select(User).where(User.email == settings.ADMIN_EMAIL))
+        if result.scalar_one_or_none():
+            return
+
+        username = re.sub(r"[^a-z0-9_-]", "", settings.ADMIN_EMAIL.split("@")[0].lower())[:32]
+        if len(username) < 3:
+            username = "admin"
+        result = await session.execute(select(User).where(User.username == username))
+        if result.scalar_one_or_none():
+            username = f"{username}-admin"[:32]
+
+        user = User(
+            email=settings.ADMIN_EMAIL,
+            username=username,
+            hashed_password=hash_password(settings.ADMIN_PASSWORD),
+            role=UserRole.ADMIN,
+            tier=UserTier.ENTERPRISE,
+        )
+        session.add(user)
+        await session.commit()
+        logger.info(f"Seeded admin user: {settings.ADMIN_EMAIL}")

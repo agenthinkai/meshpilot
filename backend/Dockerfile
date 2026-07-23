@@ -25,7 +25,7 @@ RUN mkdir -p /data /models /tmp/prometheus
 
 # Non-root user for security
 RUN useradd -r -s /bin/false meshpilot && \
-    chown -R meshpilot:meshpilot /app /tmp/prometheus
+    chown -R meshpilot:meshpilot /app /tmp/prometheus /data /models
 USER meshpilot
 
 EXPOSE 8000

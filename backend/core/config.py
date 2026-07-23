@@ -48,5 +48,9 @@ class Settings(BaseSettings):
     DEMO_MODEL_HF_REPO: str = "bartowski/Llama-3.2-1B-Instruct-GGUF"
     DEMO_MODEL_FILENAME: str = "Llama-3.2-1B-Instruct-Q4_K_M.gguf"
 
+    # Admin bootstrap (optional — creates an admin user on first startup if set)
+    ADMIN_EMAIL: str = ""
+    ADMIN_PASSWORD: str = ""
+
 
 settings = Settings()

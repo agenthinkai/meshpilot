@@ -48,12 +48,13 @@ function setupTabs() {
 }
 
 function navigateTo(page) {
+  if (!state.token) { logout(); return; }
+
   state.currentPage = page;
   document.querySelectorAll('.nav-link').forEach(l => {
     l.classList.toggle('active', l.dataset.page === page);
   });
-  document.querySelectorAll('.page').forEach(p => p.style.display = 'none');
-  document.getElementById(`page-${page}`).style.display = 'block';
+  showPage(page);
 
   // Load data for the page
   if (page === 'dashboard') loadDashboard();
@@ -63,6 +64,8 @@ function navigateTo(page) {
 }
 
 function showPage(page) {
+  const sidebar = document.querySelector('.sidebar');
+  if (sidebar) sidebar.style.display = page === 'auth' ? 'none' : '';
   document.querySelectorAll('.page').forEach(p => p.style.display = 'none');
   const el = document.getElementById(`page-${page}`);
   if (el) el.style.display = 'block';
@@ -419,6 +422,10 @@ async function apiFetch(path, method = 'GET', body = null) {
   if (body) opts.body = JSON.stringify(body);
 
   const resp = await fetch(`${API}${path}`, opts);
+  if (resp.status === 401) {
+    logout();
+    throw new Error('Session expired — please log in again');
+  }
   const data = await resp.json().catch(() => ({}));
   if (!resp.ok) throw new Error(data.detail || `HTTP ${resp.status}`);
   return data;

@@ -133,12 +133,55 @@ async def get_current_user_api_key(
     return user
 
 
+async def _optional_jwt_user(
+    credentials: Optional[HTTPAuthorizationCredentials] = Security(bearer_scheme),
+    db: AsyncSession = Depends(get_db),
+) -> Optional[User]:
+    if not credentials:
+        return None
+    try:
+        payload = decode_token(credentials.credentials)
+    except HTTPException:
+        return None
+    user_id: str = payload.get("sub")
+    if not user_id:
+        return None
+    result = await db.execute(select(User).where(User.id == user_id, User.is_active == True))
+    return result.scalar_one_or_none()
+
+
+async def _optional_api_key_user(
+    api_key: Optional[str] = Security(api_key_header),
+    db: AsyncSession = Depends(get_db),
+) -> Optional[User]:
+    if not api_key:
+        return None
+    key_hash = hash_api_key(api_key)
+    result = await db.execute(
+        select(APIKey).where(APIKey.key_hash == key_hash, APIKey.is_active == True)
+    )
+    api_key_record = result.scalar_one_or_none()
+    if not api_key_record:
+        return None
+
+    api_key_record.last_used = datetime.now(timezone.utc)
+    api_key_record.requests_count = (api_key_record.requests_count or 0) + 1
+
+    result = await db.execute(
+        select(User).where(User.id == api_key_record.user_id, User.is_active == True)
+    )
+    return result.scalar_one_or_none()
+
+
 async def get_current_user(
-    jwt_user: Optional[User] = Depends(get_current_user_jwt),
-    api_key_user: Optional[User] = Depends(get_current_user_api_key),
+    jwt_user: Optional[User] = Depends(_optional_jwt_user),
+    api_key_user: Optional[User] = Depends(_optional_api_key_user),
 ) -> User:
     """Accept either Bearer JWT or X-API-Key header."""
-    return jwt_user or api_key_user
+    user = jwt_user or api_key_user
+    if not user:
+        raise HTTPException(status_code=401, detail="Authentication required (Bearer token or X-API-Key)")
+    return user
 
 
 def require_role(*roles: UserRole):

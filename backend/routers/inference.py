@@ -25,7 +25,7 @@ from core.config import settings
 from core.database import (
     InferenceLog, InferenceStatus, ModelRecord, ModelStatus, User, get_db,
 )
-from core.security import get_current_user_api_key, get_current_user_jwt
+from core.security import get_current_user_api_key, get_current_user_jwt, get_current_user
 from core.metrics import (
     INFERENCE_REQUESTS_TOTAL, INFERENCE_LATENCY_MS,
     INFERENCE_TTFT_MS, TOKENS_GENERATED_TOTAL, THROUGHPUT_TPS,
@@ -266,7 +266,7 @@ async def get_task(
 async def inference_history(
     limit:  int = 50,
     db:     AsyncSession = Depends(get_db),
-    user:   User         = Depends(get_current_user_api_key),
+    user:   User         = Depends(get_current_user),
 ):
     result = await db.execute(
         select(InferenceLog)

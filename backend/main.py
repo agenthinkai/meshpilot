@@ -30,9 +30,10 @@ async def lifespan(app: FastAPI):
     """Startup and shutdown lifecycle."""
     logger.info("meshpilot.startup", version="1.0.0-mvp", cpu_only=True)
     await init_db()
-    # Seed demo model record if not present
-    from core.seed import seed_demo_models
+    # Seed demo model record and bootstrap admin account if not present
+    from core.seed import seed_demo_models, seed_admin_user
     await seed_demo_models()
+    await seed_admin_user()
     yield
     logger.info("meshpilot.shutdown")
 

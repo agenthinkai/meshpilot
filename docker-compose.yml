@@ -44,6 +44,8 @@ services:
       - REDIS_URL=redis://redis:6379/0
       - MODEL_STORAGE=/models
       - SECRET_KEY=${SECRET_KEY:-changeme-in-production-32chars!!}
+      - ADMIN_EMAIL=${ADMIN_EMAIL:-}
+      - ADMIN_PASSWORD=${ADMIN_PASSWORD:-}
       - PROMETHEUS_MULTIPROC_DIR=/tmp/prometheus
       - LOG_LEVEL=${LOG_LEVEL:-info}
       - WORKERS=${API_WORKERS:-4}
@@ -51,6 +53,7 @@ services:
       - model-storage:/models
       - sqlite-data:/data
       - ./backend:/app:ro
+      - ./frontend:/app/frontend:ro
     depends_on:
       - redis
     restart: unless-stopped
