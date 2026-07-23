@@ -17,7 +17,6 @@ let state = {
 // ── Init ──────────────────────────────────────────────────────────────────
 document.addEventListener('DOMContentLoaded', () => {
   setupNavigation();
-  setupTabs();
   if (state.token) {
     showApp();
   } else {
@@ -31,18 +30,6 @@ function setupNavigation() {
       e.preventDefault();
       const page = link.dataset.page;
       navigateTo(page);
-    });
-  });
-}
-
-function setupTabs() {
-  document.querySelectorAll('.tab-btn').forEach(btn => {
-    btn.addEventListener('click', () => {
-      const tab = btn.dataset.tab;
-      document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
-      document.querySelectorAll('.tab-content').forEach(c => c.style.display = 'none');
-      btn.classList.add('active');
-      document.getElementById(`tab-${tab}`).style.display = 'block';
     });
   });
 }
@@ -97,21 +84,6 @@ async function login() {
     showApp();
   } catch (e) {
     showError(e.message || 'Login failed');
-  }
-}
-
-async function signup() {
-  const username = document.getElementById('signupUsername').value.trim();
-  const email    = document.getElementById('signupEmail').value.trim();
-  const pwd      = document.getElementById('signupPassword').value;
-  try {
-    await apiFetch('/api/v1/auth/register', 'POST', { username, email, password: pwd });
-    // Auto-login after signup
-    document.getElementById('loginEmail').value = email;
-    document.getElementById('loginPassword').value = pwd;
-    await login();
-  } catch (e) {
-    showError(e.message || 'Signup failed');
   }
 }
 

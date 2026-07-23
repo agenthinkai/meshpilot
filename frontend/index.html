@@ -51,20 +51,10 @@
         <div class="auth-card">
           <h1>⚡ MeshPilot</h1>
           <p class="auth-subtitle">CPU-Only AI Inference Platform</p>
-          <div class="tab-bar">
-            <button class="tab-btn active" data-tab="login">Login</button>
-            <button class="tab-btn" data-tab="signup">Sign Up</button>
-          </div>
           <div id="tab-login" class="tab-content">
             <input type="email" id="loginEmail" placeholder="Email" class="input-field" />
             <input type="password" id="loginPassword" placeholder="Password" class="input-field" />
             <button class="btn-primary full-width" onclick="login()">Login</button>
-          </div>
-          <div id="tab-signup" class="tab-content" style="display:none">
-            <input type="text" id="signupUsername" placeholder="Username" class="input-field" />
-            <input type="email" id="signupEmail" placeholder="Email" class="input-field" />
-            <input type="password" id="signupPassword" placeholder="Password (min 8 chars)" class="input-field" />
-            <button class="btn-primary full-width" onclick="signup()">Create Account</button>
           </div>
           <div id="authError" class="error-msg" style="display:none"></div>
         </div>

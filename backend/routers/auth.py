@@ -1,4 +1,4 @@
-"""MeshPilot Auth Router — signup, login, API key management."""
+"""MeshPilot Auth Router — login, API key management."""
 
 from __future__ import annotations
 
@@ -7,15 +7,14 @@ from datetime import datetime, timezone
 from typing import List, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, status
-from pydantic import BaseModel, EmailStr, field_validator
+from pydantic import BaseModel, EmailStr
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from core.database import APIKey, User, UserRole, UserTier, get_db
+from core.database import APIKey, User, UserTier, get_db
 from core.security import (
     create_access_token,
     generate_api_key,
-    hash_password,
     verify_password,
     get_current_user_jwt,
 )
@@ -24,28 +23,6 @@ router = APIRouter()
 
 
 # ── Schemas ───────────────────────────────────────────────────────────────────
-
-class SignupRequest(BaseModel):
-    email:    EmailStr
-    username: str
-    password: str
-
-    @field_validator("username")
-    @classmethod
-    def username_valid(cls, v):
-        if len(v) < 3 or len(v) > 32:
-            raise ValueError("Username must be 3–32 characters")
-        if not v.replace("_", "").replace("-", "").isalnum():
-            raise ValueError("Username may only contain letters, digits, hyphens, underscores")
-        return v.lower()
-
-    @field_validator("password")
-    @classmethod
-    def password_strength(cls, v):
-        if len(v) < 8:
-            raise ValueError("Password must be at least 8 characters")
-        return v
-
 
 class LoginRequest(BaseModel):
     email:    EmailStr
@@ -92,40 +69,6 @@ class CreateAPIKeyResponse(BaseModel):
 
 
 # ── Endpoints ─────────────────────────────────────────────────────────────────
-
-@router.post("/signup", response_model=TokenResponse, status_code=201)
-async def signup(body: SignupRequest, db: AsyncSession = Depends(get_db)):
-    # Check uniqueness
-    result = await db.execute(select(User).where(User.email == body.email))
-    if result.scalar_one_or_none():
-        raise HTTPException(400, "Email already registered")
-    result = await db.execute(select(User).where(User.username == body.username))
-    if result.scalar_one_or_none():
-        raise HTTPException(400, "Username already taken")
-
-    # First user becomes admin
-    count_result = await db.execute(select(User))
-    is_first = count_result.scalars().first() is None
-
-    user = User(
-        email           = body.email,
-        username        = body.username,
-        hashed_password = hash_password(body.password),
-        role            = UserRole.ADMIN if is_first else UserRole.USER,
-        tier            = UserTier.FREE,
-    )
-    db.add(user)
-    await db.flush()
-
-    token = create_access_token({"sub": user.id, "role": user.role.value})
-    return TokenResponse(
-        access_token=token,
-        user_id=user.id,
-        username=user.username,
-        role=user.role.value,
-        tier=user.tier.value,
-    )
-
 
 @router.post("/login", response_model=TokenResponse)
 async def login(body: LoginRequest, db: AsyncSession = Depends(get_db)):
