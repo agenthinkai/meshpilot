@@ -40,6 +40,13 @@ while ($adminPassword.Length -lt 8) {
     }
 }
 
+$portText = Read-Host "Local port [default: 8100]"
+if ([string]::IsNullOrWhiteSpace($portText)) { $portText = "8100" }
+$port = 0
+while (-not [int]::TryParse($portText, [ref]$port) -or $port -lt 1 -or $port -gt 65535) {
+    $portText = Read-Host "Please enter a valid port number (1-65535)"
+}
+
 # -- 3. Git check ----------------------------------------------------------------
 if (-not (Get-Command git -ErrorAction SilentlyContinue)) {
     Write-Host "Git not found. Installing Git for Windows..."
@@ -96,6 +103,7 @@ New-Item -ItemType Directory -Path $modelDir -Force | Out-Null
 $modelDirDocker = $modelDir -replace '\\', '/'
 Add-Content .env ""
 Add-Content .env "MODEL_DIR=$modelDirDocker"
+Add-Content .env "MESHPILOT_PORT=$port"
 
 # -- 7. Start ---------------------------------------------------------------
 Write-Host ""
@@ -103,5 +111,5 @@ Write-Host "Building and starting MeshPilot (this can take several minutes on fi
 docker compose up -d --build
 
 Write-Host ""
-Write-Host "===== MeshPilot is running at http://localhost:8100 =====" -ForegroundColor Green
+Write-Host "===== MeshPilot is running at http://localhost:$port =====" -ForegroundColor Green
 Write-Host "Log in with: $adminEmail"

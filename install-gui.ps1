@@ -1,7 +1,7 @@
 # MeshPilot Windows Installer - GUI
-# Collects an install folder and admin credentials via a form, then clones the
-# repo, configures .env, and starts the stack via Docker Compose in the background
-# while streaming progress into the log box.
+# Collects an install folder, admin credentials, and a port via a form, then
+# clones the repo, configures .env, and starts the stack via Docker Compose in
+# the background while streaming progress into the log box.
 
 Add-Type -AssemblyName System.Windows.Forms
 Add-Type -AssemblyName System.Drawing
@@ -10,7 +10,7 @@ Add-Type -AssemblyName System.Drawing
 # -- Form -----------------------------------------------------------------------
 $form = New-Object System.Windows.Forms.Form
 $form.Text = "MeshPilot Installer"
-$form.Size = New-Object System.Drawing.Size(560, 560)
+$form.Size = New-Object System.Drawing.Size(560, 660)
 $form.StartPosition = "CenterScreen"
 $form.FormBorderStyle = "FixedDialog"
 $form.MaximizeBox = $false
@@ -66,32 +66,55 @@ $txtPass2.Location = New-Object System.Drawing.Point(20, 260)
 $txtPass2.Size = New-Object System.Drawing.Size(500, 25)
 $txtPass2.UseSystemPasswordChar = $true
 
+$lblPort = New-Object System.Windows.Forms.Label
+$lblPort.Text = "Local port (default 8100):"
+$lblPort.Location = New-Object System.Drawing.Point(20, 296)
+$lblPort.AutoSize = $true
+
+$txtPort = New-Object System.Windows.Forms.TextBox
+$txtPort.Location = New-Object System.Drawing.Point(20, 318)
+$txtPort.Size = New-Object System.Drawing.Size(100, 25)
+$txtPort.Text = "8100"
+
+$lblPortHint = New-Object System.Windows.Forms.Label
+$lblPortHint.Text = "MeshPilot will open at http://localhost:<port>"
+$lblPortHint.Location = New-Object System.Drawing.Point(130, 322)
+$lblPortHint.AutoSize = $true
+$lblPortHint.ForeColor = [System.Drawing.Color]::Gray
+
 $btnInstall = New-Object System.Windows.Forms.Button
 $btnInstall.Text = "Install"
-$btnInstall.Location = New-Object System.Drawing.Point(20, 300)
+$btnInstall.Location = New-Object System.Drawing.Point(20, 356)
 $btnInstall.Size = New-Object System.Drawing.Size(120, 36)
 $btnInstall.BackColor = [System.Drawing.Color]::FromArgb(37, 99, 235)
 $btnInstall.ForeColor = [System.Drawing.Color]::White
 $btnInstall.FlatStyle = "Flat"
 
+$btnCancel = New-Object System.Windows.Forms.Button
+$btnCancel.Text = "Cancel"
+$btnCancel.Location = New-Object System.Drawing.Point(150, 356)
+$btnCancel.Size = New-Object System.Drawing.Size(100, 36)
+$btnCancel.Enabled = $false
+
 $lblStatus = New-Object System.Windows.Forms.Label
 $lblStatus.Text = ""
-$lblStatus.Location = New-Object System.Drawing.Point(155, 310)
+$lblStatus.Location = New-Object System.Drawing.Point(265, 366)
 $lblStatus.AutoSize = $true
 
 $progress = New-Object System.Windows.Forms.ProgressBar
-$progress.Style = "Marquee"
-$progress.MarqueeAnimationSpeed = 30
-$progress.Location = New-Object System.Drawing.Point(20, 344)
-$progress.Size = New-Object System.Drawing.Size(500, 18)
-$progress.Visible = $false
+$progress.Style = "Blocks"
+$progress.Minimum = 0
+$progress.Maximum = 100
+$progress.Value = 0
+$progress.Location = New-Object System.Drawing.Point(20, 404)
+$progress.Size = New-Object System.Drawing.Size(500, 20)
 
 $txtLog = New-Object System.Windows.Forms.TextBox
 $txtLog.Multiline = $true
 $txtLog.ScrollBars = "Vertical"
 $txtLog.ReadOnly = $true
-$txtLog.Location = New-Object System.Drawing.Point(20, 372)
-$txtLog.Size = New-Object System.Drawing.Size(500, 140)
+$txtLog.Location = New-Object System.Drawing.Point(20, 434)
+$txtLog.Size = New-Object System.Drawing.Size(500, 150)
 $txtLog.Font = New-Object System.Drawing.Font("Consolas", 8.5)
 $txtLog.BackColor = [System.Drawing.Color]::FromArgb(30, 30, 30)
 $txtLog.ForeColor = [System.Drawing.Color]::FromArgb(220, 220, 220)
@@ -99,7 +122,8 @@ $txtLog.ForeColor = [System.Drawing.Color]::FromArgb(220, 220, 220)
 $form.Controls.AddRange(@(
     $lblTitle, $lblFolder, $txtFolder, $btnBrowse,
     $lblEmail, $txtEmail, $lblPass, $txtPass, $lblPass2, $txtPass2,
-    $btnInstall, $lblStatus, $progress, $txtLog
+    $lblPort, $txtPort, $lblPortHint,
+    $btnInstall, $btnCancel, $lblStatus, $progress, $txtLog
 ))
 
 # -- Helpers ----------------------------------------------------------------------
@@ -119,7 +143,9 @@ function Set-FormEnabled([bool]$enabled) {
     $txtEmail.Enabled = $enabled
     $txtPass.Enabled = $enabled
     $txtPass2.Enabled = $enabled
+    $txtPort.Enabled = $enabled
     $btnInstall.Enabled = $enabled
+    $btnCancel.Enabled = -not $enabled
 }
 
 $btnBrowse.Add_Click({
@@ -132,13 +158,15 @@ $btnBrowse.Add_Click({
 
 # -- Background install job ------------------------------------------------------
 $jobScript = {
-    param($installDir, $email, $pass)
+    param($installDir, $email, $pass, $port)
 
     function New-RandomHex64 {
         $bytes = New-Object byte[] 32
         [System.Security.Cryptography.RandomNumberGenerator]::Create().GetBytes($bytes)
         -join ($bytes | ForEach-Object { $_.ToString("x2") })
     }
+
+    Write-Output "PROGRESS:5"
 
     if (-not (Get-Command git -ErrorAction SilentlyContinue)) {
         Write-Output "Git not found. Installing Git for Windows..."
@@ -152,6 +180,7 @@ $jobScript = {
     } else {
         Write-Output "Git is already installed."
     }
+    Write-Output "PROGRESS:15"
 
     if (-not (Get-Command docker -ErrorAction SilentlyContinue)) {
         Write-Output "Docker not found. Installing Docker Desktop..."
@@ -160,6 +189,7 @@ $jobScript = {
         return
     }
     Write-Output "Docker is already installed."
+    Write-Output "PROGRESS:30"
 
     $parent = Split-Path $installDir -Parent
     if ($parent -and -not (Test-Path $parent)) {
@@ -173,6 +203,7 @@ $jobScript = {
     } else {
         Write-Output "Folder already exists: $installDir - skipping clone."
     }
+    Write-Output "PROGRESS:55"
 
     Set-Location $installDir
     Copy-Item ".env.example" ".env" -Force
@@ -189,17 +220,22 @@ $jobScript = {
     $modelDirDocker = $modelDir -replace '\\', '/'
     Add-Content ".env" ""
     Add-Content ".env" "MODEL_DIR=$modelDirDocker"
+    Add-Content ".env" "MESHPILOT_PORT=$port"
     Write-Output "Environment configured."
+    Write-Output "PROGRESS:70"
 
     Write-Output "Building and starting MeshPilot (this can take several minutes)..."
     docker compose up -d --build 2>&1 | ForEach-Object { Write-Output "$_" }
     if ($LASTEXITCODE -ne 0) { throw "docker compose failed with exit code $LASTEXITCODE" }
 
+    Write-Output "PROGRESS:100"
     Write-Output "INSTALL_COMPLETE"
 }
 
 $script:job = $null
 $script:needsRestart = $false
+$script:chosenPort = "8100"
+$script:installDirForCancel = ""
 
 $timer = New-Object System.Windows.Forms.Timer
 $timer.Interval = 300
@@ -211,6 +247,7 @@ $timer.Add_Tick({
     foreach ($line in $lines) {
         if ($line -eq "DOCKER_INSTALLED_NEEDS_RESTART") { $script:needsRestart = $true; continue }
         if ($line -eq "INSTALL_COMPLETE") { continue }
+        if ($line -match "^PROGRESS:(\d+)$") { $progress.Value = [int]$Matches[1]; continue }
         Write-Log "$line"
     }
 
@@ -221,7 +258,6 @@ $timer.Add_Tick({
         Remove-Job -Job $script:job -Force
         $script:job = $null
 
-        $progress.Visible = $false
         Set-FormEnabled $true
 
         if ($wasFailed) {
@@ -238,9 +274,9 @@ $timer.Add_Tick({
         } else {
             Set-Status "Done!"
             [System.Windows.Forms.MessageBox]::Show(
-                "MeshPilot is running at http://localhost:8100`r`nLog in with: $($txtEmail.Text)",
+                "MeshPilot is running at http://localhost:$($script:chosenPort)`r`nLog in with: $($txtEmail.Text)",
                 "MeshPilot Installer") | Out-Null
-            Start-Process "http://localhost:8100"
+            Start-Process "http://localhost:$($script:chosenPort)"
         }
     }
 })
@@ -250,6 +286,7 @@ $btnInstall.Add_Click({
     $email = $txtEmail.Text.Trim()
     $pass = $txtPass.Text
     $pass2 = $txtPass2.Text
+    $portText = $txtPort.Text.Trim()
 
     if (-not $installDir) {
         [System.Windows.Forms.MessageBox]::Show("Please choose an install folder.", "MeshPilot Installer") | Out-Null
@@ -267,17 +304,57 @@ $btnInstall.Add_Click({
         [System.Windows.Forms.MessageBox]::Show("Passwords do not match.", "MeshPilot Installer") | Out-Null
         return
     }
+    $portNum = 0
+    if (-not [int]::TryParse($portText, [ref]$portNum) -or $portNum -lt 1 -or $portNum -gt 65535) {
+        [System.Windows.Forms.MessageBox]::Show("Please enter a valid port number (1-65535).", "MeshPilot Installer") | Out-Null
+        return
+    }
 
     $installDir = [System.IO.Path]::GetFullPath($installDir)
+    $script:chosenPort = $portNum
+    $script:installDirForCancel = $installDir
 
     Set-FormEnabled $false
-    $progress.Visible = $true
+    $progress.Value = 0
     $txtLog.Clear()
     Set-Status "Starting install..."
     $script:needsRestart = $false
 
-    $script:job = Start-Job -ScriptBlock $jobScript -ArgumentList $installDir, $email, $pass
+    $script:job = Start-Job -ScriptBlock $jobScript -ArgumentList $installDir, $email, $pass, $portNum
     $timer.Start()
+})
+
+$btnCancel.Add_Click({
+    $timer.Stop()
+    Set-Status "Cancelling..."
+    Write-Log "Cancelling installation..."
+
+    if ($script:job) {
+        Stop-Job -Job $script:job -ErrorAction SilentlyContinue
+        Remove-Job -Job $script:job -Force -ErrorAction SilentlyContinue
+        $script:job = $null
+    }
+
+    if ($script:installDirForCancel -and (Test-Path (Join-Path $script:installDirForCancel "docker-compose.yml"))) {
+        Write-Log "Cleaning up any containers that were started..."
+        try {
+            $psi = New-Object System.Diagnostics.ProcessStartInfo
+            $psi.FileName = "docker"
+            $psi.Arguments = "compose down"
+            $psi.WorkingDirectory = $script:installDirForCancel
+            $psi.UseShellExecute = $false
+            $psi.CreateNoWindow = $true
+            $p = [System.Diagnostics.Process]::Start($psi)
+            $p.WaitForExit()
+        } catch {
+            Write-Log "Cleanup step failed (this is usually harmless): $_"
+        }
+    }
+
+    $progress.Value = 0
+    Set-Status "Cancelled."
+    Write-Log "Installation cancelled."
+    Set-FormEnabled $true
 })
 
 [void]$form.ShowDialog()
