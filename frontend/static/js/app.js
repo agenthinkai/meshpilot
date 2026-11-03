@@ -262,6 +262,8 @@ async function uploadModel() {
 }
 
 // ── Demo ──────────────────────────────────────────────────────────────────
+const COMPARE_AVAILABLE_MODEL_IDS = ['benchmark-qwen25-05b'];
+
 async function loadDemoModels() {
   try {
     const models = await apiFetch('/api/v1/models');
@@ -270,9 +272,30 @@ async function loadDemoModels() {
     sel.innerHTML = ready.length
       ? ready.map(m => `<option value="${m.id}">${m.name} (${m.quant_bits || 'FP32'})</option>`).join('')
       : '<option value="">No ready models — upload one first</option>';
+    sel.onchange = updateCompareAvailability;
+    updateCompareAvailability();
   } catch (e) {
     console.error('Failed to load demo models:', e);
   }
+}
+
+function updateCompareAvailability() {
+  const modelId = document.getElementById('demoModel').value;
+  const available = COMPARE_AVAILABLE_MODEL_IDS.includes(modelId);
+  const checkbox = document.getElementById('compareMode');
+  const note = document.getElementById('compareNote');
+  checkbox.disabled = !available;
+  if (!available) checkbox.checked = false;
+  note.textContent = available
+    ? 'Runs the exact same model through MeshPilot (llama.cpp, INT4) and plain PyTorch (FP32) side by side, live.'
+    : 'Compare is only wired up for Qwen2.5-0.5B-Instruct right now — select it above to enable.';
+  onCompareToggle();
+}
+
+function onCompareToggle() {
+  const compare = document.getElementById('compareMode').checked;
+  document.getElementById('responseArea').style.display = 'none';
+  document.getElementById('compareArea').style.display = 'none';
 }
 
 async function runDemo() {
@@ -281,26 +304,41 @@ async function runDemo() {
   if (!modelId) { alert('Select a model first'); return; }
   if (!prompt)  { alert('Enter a prompt'); return; }
 
+  const compareMode = document.getElementById('compareMode').checked;
   const btn = document.getElementById('runBtn');
   btn.disabled = true;
   btn.textContent = '⏳ Running...';
   document.getElementById('responseArea').style.display = 'none';
+  document.getElementById('compareArea').style.display = 'none';
 
-  // Use API key if available, else JWT
   const headers = state.apiKey
     ? { 'X-API-Key': state.apiKey }
     : { 'Authorization': `Bearer ${state.token}` };
 
+  const body = JSON.stringify({
+    prompt,
+    max_tokens: parseInt(document.getElementById('maxTokens').value),
+    temperature: parseFloat(document.getElementById('temperature').value),
+  });
+
   try {
-    const t0 = Date.now();
+    if (compareMode) {
+      await runCompare(modelId, headers, body);
+    } else {
+      await runSingle(modelId, headers, body);
+    }
+  } finally {
+    btn.disabled = false;
+    btn.textContent = '▶ Run Inference';
+  }
+}
+
+async function runSingle(modelId, headers, body) {
+  try {
     const resp = await fetch(`${API}/api/v1/inference/sync/${modelId}`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', ...headers },
-      body: JSON.stringify({
-        prompt,
-        max_tokens: parseInt(document.getElementById('maxTokens').value),
-        temperature: parseFloat(document.getElementById('temperature').value),
-      }),
+      body,
     });
     const data = await resp.json();
     if (!resp.ok) throw new Error(data.detail || resp.statusText);
@@ -313,9 +351,119 @@ async function runDemo() {
     document.getElementById('responseText').textContent = `Error: ${e.message}`;
     document.getElementById('responseMeta').textContent = '';
     document.getElementById('responseArea').style.display = 'block';
-  } finally {
-    btn.disabled = false;
-    btn.textContent = '▶ Run Inference';
+  }
+}
+
+function fmtSeconds(ms) {
+  if (ms == null) return '—';
+  return ms >= 1000 ? `${(ms / 1000).toFixed(1)}s` : `${Math.round(ms)}ms`;
+}
+
+function fmtMem(mb) {
+  if (mb == null) return null;
+  return mb >= 1024 ? `${(mb / 1024).toFixed(2)} GB` : `${Math.round(mb)} MB`;
+}
+
+function setupClip(id, text) {
+  const el = document.getElementById(id);
+  const btn = document.getElementById(id.replace('Text', 'ExpandBtn'));
+  el.textContent = text;
+  el.classList.remove('expanded');
+  requestAnimationFrame(() => {
+    const overflowing = el.scrollHeight > el.clientHeight + 4;
+    el.classList.toggle('clipped', overflowing);
+    btn.style.display = overflowing ? 'block' : 'none';
+    btn.textContent = 'Show full response ▾';
+  });
+}
+
+function toggleExpand(which) {
+  const id = which === 'with' ? 'withText' : 'withoutText';
+  const el = document.getElementById(id);
+  const btn = document.getElementById(id.replace('Text', 'ExpandBtn'));
+  const nowExpanded = el.classList.toggle('expanded');
+  el.classList.toggle('clipped', !nowExpanded);
+  btn.textContent = nowExpanded ? 'Show less ▴' : 'Show full response ▾';
+}
+
+async function runCompare(modelId, headers, body) {
+  document.getElementById('compareArea').style.display = 'block';
+  document.getElementById('speedupBanner').style.display = 'none';
+  document.getElementById('statCards').style.display = 'none';
+  document.getElementById('chartBlock').style.display = 'none';
+  document.getElementById('withText').textContent = 'running…';
+  document.getElementById('withoutText').textContent = 'running… (plain PyTorch is much slower — this is expected)';
+  document.getElementById('withExpandBtn').style.display = 'none';
+  document.getElementById('withoutExpandBtn').style.display = 'none';
+
+  try {
+    const resp = await fetch(`${API}/api/v1/inference/compare/${modelId}`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', ...headers },
+      body,
+    });
+    const data = await resp.json();
+    if (!resp.ok) throw new Error(data.detail || resp.statusText);
+
+    const w = data.with_meshpilot || {};
+    const wo = data.without_meshpilot || {};
+
+    setupClip('withText', w.error ? `Error: ${w.error}` : (w.text || '(empty response)'));
+    setupClip('withoutText', wo.error ? `Error: ${wo.error}` : (wo.text || '(empty response)'));
+
+    if (!w.error && !wo.error) {
+      // Stat cards
+      document.getElementById('statWithLatency').textContent = fmtSeconds(w.wall_clock_ms);
+      document.getElementById('statWithTps').textContent = `${w.throughput_tps} tok/s · ${w.completion_tokens} tokens`;
+      document.getElementById('statWithoutLatency').textContent = fmtSeconds(wo.wall_clock_ms);
+      document.getElementById('statWithoutTps').textContent = `${wo.throughput_tps} tok/s · ${wo.completion_tokens} tokens`;
+      document.getElementById('statWithMem').textContent = fmtMem(w.memory_mb) ? `📊 ${fmtMem(w.memory_mb)} RAM (live)` : '';
+      document.getElementById('statWithoutMem').textContent = fmtMem(wo.memory_mb) ? `📊 ${fmtMem(wo.memory_mb)} RAM (live)` : '';
+      document.getElementById('statCards').style.display = 'grid';
+
+      // Bar charts (width % relative to the larger of the two values)
+      const maxLatency = Math.max(w.wall_clock_ms, wo.wall_clock_ms) || 1;
+      const maxTps = Math.max(w.throughput_tps, wo.throughput_tps) || 1;
+      document.getElementById('chartBlock').style.display = 'block';
+      // Reset to 0 first so the width transition animates on every run
+      const barIds = ['barLatencyWith', 'barLatencyWithout', 'barTpsWith', 'barTpsWithout'];
+      const hasMemory = w.memory_mb != null && wo.memory_mb != null;
+      document.getElementById('memoryChartRow').style.display = hasMemory ? 'block' : 'none';
+      if (hasMemory) barIds.push('barMemWith', 'barMemWithout');
+      barIds.forEach(id => { document.getElementById(id).style.width = '0%'; });
+
+      requestAnimationFrame(() => {
+        document.getElementById('barLatencyWith').style.width = `${(w.wall_clock_ms / maxLatency) * 100}%`;
+        document.getElementById('barLatencyWithout').style.width = `${(wo.wall_clock_ms / maxLatency) * 100}%`;
+        document.getElementById('barTpsWith').style.width = `${(w.throughput_tps / maxTps) * 100}%`;
+        document.getElementById('barTpsWithout').style.width = `${(wo.throughput_tps / maxTps) * 100}%`;
+        if (hasMemory) {
+          const maxMem = Math.max(w.memory_mb, wo.memory_mb) || 1;
+          document.getElementById('barMemWith').style.width = `${(w.memory_mb / maxMem) * 100}%`;
+          document.getElementById('barMemWithout').style.width = `${(wo.memory_mb / maxMem) * 100}%`;
+        }
+      });
+      document.getElementById('barLatencyWithVal').textContent = fmtSeconds(w.wall_clock_ms);
+      document.getElementById('barLatencyWithoutVal').textContent = fmtSeconds(wo.wall_clock_ms);
+      document.getElementById('barTpsWithVal').textContent = `${w.throughput_tps} t/s`;
+      document.getElementById('barTpsWithoutVal').textContent = `${wo.throughput_tps} t/s`;
+      if (hasMemory) {
+        document.getElementById('barMemWithVal').textContent = fmtMem(w.memory_mb);
+        document.getElementById('barMemWithoutVal').textContent = fmtMem(wo.memory_mb);
+      }
+    }
+
+    if (data.speedup_x) {
+      const banner = document.getElementById('speedupBanner');
+      let text = `⚡ MeshPilot was ${data.speedup_x}x faster`;
+      if (data.memory_reduction_pct) text += ` and used ${data.memory_reduction_pct}% less memory`;
+      text += ` — same model, same prompt, same machine`;
+      banner.textContent = text;
+      banner.style.display = 'block';
+    }
+  } catch (e) {
+    setupClip('withText', `Error: ${e.message}`);
+    setupClip('withoutText', '');
   }
 }
 

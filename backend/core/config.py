@@ -15,7 +15,7 @@ class Settings(BaseSettings):
     API_KEY_PREFIX: str = "mp_"
 
     # Database
-    DATABASE_URL: str = "sqlite+aiosqlite:////data/meshpilot.db"
+    DATABASE_URL: str = "postgresql+asyncpg://meshpilot:changeme-in-production@postgres:5432/meshpilot"
 
     # Redis
     REDIS_URL: str = "redis://localhost:6379/0"
@@ -25,8 +25,11 @@ class Settings(BaseSettings):
     MAX_MODEL_SIZE_GB: float = 8.0
 
     # Inference backends
-    LLAMACPP_URL: str = "http://llamacpp:8080"
+    # No LLAMACPP_URL -- llama-server is single-model-per-process, so there is
+    # no one standing endpoint; core/model_orchestrator.py starts a dynamic
+    # per-model container on demand and returns its endpoint URL directly.
     ONNX_URL: str = "http://onnx:8090"
+    PYTORCH_BASELINE_URL: str = "http://pytorch-baseline:8091"
     INFERENCE_TIMEOUT_S: int = 120
 
     # CORS

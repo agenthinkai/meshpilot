@@ -10,6 +10,7 @@ Endpoints:
 
 from __future__ import annotations
 
+import asyncio
 import time
 import uuid
 from datetime import datetime, timezone
@@ -25,6 +26,7 @@ from core.config import settings
 from core.database import (
     InferenceLog, InferenceStatus, ModelRecord, ModelStatus, User, get_db,
 )
+from core.model_orchestrator import container_name_for, ensure_model_running
 from core.security import get_current_user_api_key, get_current_user_jwt, get_current_user
 from core.metrics import (
     INFERENCE_REQUESTS_TOTAL, INFERENCE_LATENCY_MS,
@@ -81,7 +83,10 @@ async def _get_ready_model(model_id: str, user: User, db: AsyncSession) -> Model
 
 
 async def _call_llamacpp(model: ModelRecord, req: InferenceRequest) -> dict:
-    """Call the llama.cpp server OpenAI-compatible API."""
+    """Call the llama.cpp server OpenAI-compatible API. Ensures a dynamic
+    per-model instance is running first — llama-server serves exactly one
+    GGUF per process, so there is no single standing LLAMACPP_URL anymore."""
+    endpoint = await ensure_model_running(model)
     payload = {
         "model":       model.file_path,
         "prompt":      req.prompt,
@@ -92,7 +97,7 @@ async def _call_llamacpp(model: ModelRecord, req: InferenceRequest) -> dict:
     }
     async with httpx.AsyncClient(timeout=settings.INFERENCE_TIMEOUT_S) as client:
         t0 = time.perf_counter()
-        resp = await client.post(f"{settings.LLAMACPP_URL}/completion", json=payload)
+        resp = await client.post(f"{endpoint}/completion", json=payload)
         resp.raise_for_status()
         latency_ms = (time.perf_counter() - t0) * 1000
         data = resp.json()
@@ -144,6 +149,43 @@ async def _run_inference(model: ModelRecord, req: InferenceRequest) -> dict:
     return await _call_llamacpp(model, req)
 
 
+# Models with both a llamacpp (INT4 GGUF) side AND a matching plain-PyTorch
+# FP32 baseline deployed, keyed by model_id -> whether the baseline is ready.
+# Compare only ever runs the SAME underlying model on both sides.
+COMPARE_AVAILABLE_MODEL_IDS = {"benchmark-qwen25-05b"}
+
+
+async def _get_container_memory_mb(container_name: str) -> Optional[float]:
+    """Read a container's current real memory usage via the Docker Engine API
+    over the mounted socket — the same figure `docker stats` shows (usage
+    minus reclaimable page cache), used for the Compare view's live memory
+    comparison."""
+    try:
+        transport = httpx.AsyncHTTPTransport(uds="/var/run/docker.sock")
+        async with httpx.AsyncClient(transport=transport, timeout=10.0) as client:
+            resp = await client.get(f"http://docker/containers/{container_name}/stats?stream=false")
+            resp.raise_for_status()
+            data = resp.json()
+            mem = data.get("memory_stats", {})
+            usage = mem.get("usage")
+            if usage is None:
+                return None
+            stats = mem.get("stats", {})
+            cache = stats.get("inactive_file", stats.get("cache", 0))
+            return round((usage - cache) / (1024 * 1024), 1)
+    except Exception:
+        return None
+
+
+async def _call_pytorch_baseline(req: InferenceRequest) -> dict:
+    """Call the standing 'without MeshPilot' baseline server (plain PyTorch, FP32)."""
+    payload = {"prompt": req.prompt, "max_tokens": req.max_tokens, "temperature": req.temperature}
+    async with httpx.AsyncClient(timeout=settings.INFERENCE_TIMEOUT_S) as client:
+        resp = await client.post(f"{settings.PYTORCH_BASELINE_URL}/generate", json=payload)
+        resp.raise_for_status()
+        return resp.json()
+
+
 # ── Sync endpoint ─────────────────────────────────────────────────────────────
 
 @router.post("/sync/{model_id}", response_model=InferenceResponse)
@@ -151,7 +193,7 @@ async def infer_sync(
     model_id: str,
     req:      InferenceRequest,
     db:       AsyncSession = Depends(get_db),
-    user:     User         = Depends(get_current_user_api_key),
+    user:     User         = Depends(get_current_user),
 ):
     model = await _get_ready_model(model_id, user, db)
 
@@ -201,6 +243,84 @@ async def infer_sync(
         await db.commit()
         INFERENCE_REQUESTS_TOTAL.labels(model_id=model_id, backend="unknown", status="error").inc()
         raise HTTPException(502, f"Inference failed: {e}")
+
+
+# ── Compare endpoint ("with MeshPilot" vs "without MeshPilot") ────────────────
+
+@router.post("/compare/{model_id}")
+async def infer_compare(
+    model_id: str,
+    req:      InferenceRequest,
+    db:       AsyncSession = Depends(get_db),
+    user:     User         = Depends(get_current_user),
+):
+    """Runs the SAME model two ways and returns both: through MeshPilot
+    (llama.cpp, INT4 GGUF) and through plain PyTorch (FP32, no MeshPilot).
+    Both calls fire concurrently so neither side waits on the other."""
+    if model_id not in COMPARE_AVAILABLE_MODEL_IDS:
+        raise HTTPException(
+            400,
+            f"No 'without MeshPilot' baseline is deployed for this model yet. "
+            f"Compare currently supports: {', '.join(sorted(COMPARE_AVAILABLE_MODEL_IDS))}",
+        )
+    model = await _get_ready_model(model_id, user, db)
+
+    async def _with_meshpilot():
+        t0 = time.perf_counter()
+        try:
+            result = await _run_inference(model, req)
+            result["wall_clock_ms"] = round((time.perf_counter() - t0) * 1000, 1)
+            return result
+        except Exception as e:
+            return {"error": str(e)}
+
+    async def _without_meshpilot():
+        t0 = time.perf_counter()
+        try:
+            result = await _call_pytorch_baseline(req)
+            result["wall_clock_ms"] = round((time.perf_counter() - t0) * 1000, 1)
+            return result
+        except Exception as e:
+            return {"error": str(e)}
+
+    async def _sample_memory():
+        # Give generation a moment to actually start before sampling, so this
+        # reflects memory while the model is working, not idle baseline.
+        await asyncio.sleep(0.4)
+        return await asyncio.gather(
+            _get_container_memory_mb(container_name_for(model.id)),
+            _get_container_memory_mb("meshpilot-pytorch-baseline"),
+        )
+
+    (with_result, without_result), (with_mem_mb, without_mem_mb) = await asyncio.gather(
+        asyncio.gather(_with_meshpilot(), _without_meshpilot()),
+        _sample_memory(),
+    )
+
+    if with_mem_mb is not None:
+        with_result["memory_mb"] = with_mem_mb
+    if without_mem_mb is not None:
+        without_result["memory_mb"] = without_mem_mb
+
+    speedup = None
+    if with_result.get("wall_clock_ms") and without_result.get("wall_clock_ms"):
+        speedup = round(without_result["wall_clock_ms"] / with_result["wall_clock_ms"], 2)
+
+    memory_reduction_pct = None
+    if with_result.get("memory_mb") and without_result.get("memory_mb"):
+        memory_reduction_pct = round(
+            (1 - with_result["memory_mb"] / without_result["memory_mb"]) * 100, 1
+        )
+
+    INFERENCE_REQUESTS_TOTAL.labels(model_id=model_id, backend="compare", status="success").inc()
+
+    return {
+        "model_id": model_id,
+        "with_meshpilot": with_result,
+        "without_meshpilot": without_result,
+        "speedup_x": speedup,
+        "memory_reduction_pct": memory_reduction_pct,
+    }
 
 
 # ── Async endpoint ────────────────────────────────────────────────────────────

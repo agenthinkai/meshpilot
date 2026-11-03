@@ -10,10 +10,11 @@ scrape_configs:
       - targets: ['api:8000']
     metrics_path: '/metrics'
 
-  - job_name: 'meshpilot-llamacpp'
-    static_configs:
-      - targets: ['llamacpp:8080']
-    metrics_path: '/metrics'
+  # No static 'meshpilot-llamacpp' target: llama.cpp instances are now
+  # created/destroyed dynamically per model (core/model_orchestrator.py),
+  # each under its own container name -- there's no single fixed address for
+  # Prometheus's static_configs to scrape anymore, and no service discovery
+  # for the dynamic instances has been added (out of scope for now).
 
   - job_name: 'redis'
     static_configs:

@@ -1,6 +1,6 @@
 """
-MeshPilot Database — SQLAlchemy async with SQLite.
-All tables defined here; Alembic handles migrations.
+MeshPilot Database — SQLAlchemy async, PostgreSQL primary datastore.
+All tables defined here; Alembic (backend/alembic/) handles migrations.
 """
 
 from __future__ import annotations
@@ -22,10 +22,16 @@ from core.config import settings
 
 # ── Engine & session factory ──────────────────────────────────────────────────
 
+# check_same_thread is a SQLite/aiosqlite-only requirement (invalid for
+# asyncpg) — kept only for local dev/test convenience if DATABASE_URL is ever
+# pointed back at SQLite; the deployed default is PostgreSQL, which needs no
+# extra connect_args.
+_connect_args = {"check_same_thread": False} if settings.DATABASE_URL.startswith("sqlite") else {}
+
 engine = create_async_engine(
     settings.DATABASE_URL,
     echo=False,
-    connect_args={"check_same_thread": False},
+    connect_args=_connect_args,
 )
 
 AsyncSessionLocal = async_sessionmaker(engine, expire_on_commit=False, class_=AsyncSession)
@@ -91,6 +97,13 @@ class QuantBits(str, enum.Enum):
     INT8 = "int8"
     FP16 = "fp16"
     FP32 = "fp32"
+
+
+class InstanceStatus(str, enum.Enum):
+    STARTING = "starting"
+    READY    = "ready"
+    STOPPING = "stopping"
+    ERROR    = "error"
 
 
 # ── ORM Models ────────────────────────────────────────────────────────────────
@@ -188,6 +201,30 @@ class InferenceLog(Base):
         Index("ix_inference_user", "user_id"),
         Index("ix_inference_model", "model_id"),
         Index("ix_inference_created", "created_at"),
+    )
+
+
+class ModelInstance(Base):
+    """Tracks which ModelRecord is actually loaded in a live llama.cpp
+    container right now — the missing link that let two models both show
+    status=READY in model_records while only one was truly being served
+    (llama-server is single-model-per-process; see infra/llamacpp/start.sh).
+    One row per model_id: its presence/status here, not model_records.status,
+    is the source of truth for whether a model is currently servable."""
+    __tablename__ = "model_instances"
+
+    id             = Column(String(36), primary_key=True, default=lambda: str(uuid.uuid4()))
+    model_id       = Column(String(36), ForeignKey("model_records.id"), nullable=False, unique=True)
+    container_name = Column(String(128), nullable=False)
+    endpoint_url   = Column(String(255), nullable=False)
+    status         = Column(Enum(InstanceStatus), default=InstanceStatus.STARTING, nullable=False)
+    created_at     = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
+    last_used_at   = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
+
+    model = relationship("ModelRecord")
+
+    __table_args__ = (
+        Index("ix_model_instance_last_used", "last_used_at"),
     )
 
 

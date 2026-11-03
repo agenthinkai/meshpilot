@@ -17,8 +17,13 @@ echo "  Threads:    $THREADS"
 echo "  Context:    $CTX_SIZE"
 echo "  Batch:      $BATCH_SIZE"
 
-# Find first GGUF model
-MODEL_PATH=$(find "$MODEL_DIR" -name "*.gguf" | head -1)
+# Pin to a specific model file if set (avoids nondeterministic selection when
+# multiple GGUF files are present in MODEL_DIR); otherwise fall back to first found.
+if [ -n "$LLAMA_MODEL_FILE" ] && [ -f "$MODEL_DIR/$LLAMA_MODEL_FILE" ]; then
+    MODEL_PATH="$MODEL_DIR/$LLAMA_MODEL_FILE"
+else
+    MODEL_PATH=$(find "$MODEL_DIR" -name "*.gguf" | sort | head -1)
+fi
 
 if [ -z "$MODEL_PATH" ]; then
     echo "[MeshPilot llama.cpp] WARNING: No GGUF model found in $MODEL_DIR"

@@ -17,7 +17,6 @@ from fastapi.staticfiles import StaticFiles
 from fastapi.responses import JSONResponse
 from prometheus_fastapi_instrumentator import Instrumentator
 
-from core.database import init_db
 from core.config import settings
 from core.metrics import REGISTRY
 from routers import auth, models, inference, admin, metrics as metrics_router
@@ -29,7 +28,8 @@ logger = structlog.get_logger()
 async def lifespan(app: FastAPI):
     """Startup and shutdown lifecycle."""
     logger.info("meshpilot.startup", version="1.0.0-mvp", cpu_only=True)
-    await init_db()
+    # Schema is managed by Alembic (run via `alembic upgrade head` in the
+    # container entrypoint, before uvicorn starts) — not by create_all().
     # Seed demo model record and bootstrap admin account if not present
     from core.seed import seed_demo_models, seed_admin_user
     await seed_demo_models()

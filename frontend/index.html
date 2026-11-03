@@ -124,7 +124,7 @@
     <div id="page-demo" class="page" style="display:none">
       <div class="page-header">
         <h2>🚀 Live Demo</h2>
-        <span class="header-sub">Llama-3.2-1B-Instruct · INT4 · CPU-only</span>
+        <span class="header-sub">CPU-only · same prompt, same hardware, real numbers</span>
       </div>
 
       <div class="demo-container">
@@ -135,10 +135,18 @@
           </select>
         </div>
 
+        <div class="compare-toggle">
+          <label class="compare-toggle-label">
+            <input type="checkbox" id="compareMode" onchange="onCompareToggle()" />
+            Compare: With vs Without MeshPilot (same model, both live)
+          </label>
+          <div class="compare-toggle-note" id="compareNote"></div>
+        </div>
+
         <div class="demo-params">
           <div class="param-group">
-            <label>Max Tokens <span id="maxTokensVal">512</span></label>
-            <input type="range" id="maxTokens" min="64" max="2048" value="512"
+            <label>Max Tokens <span id="maxTokensVal">150</span></label>
+            <input type="range" id="maxTokens" min="64" max="2048" value="150"
               oninput="document.getElementById('maxTokensVal').textContent=this.value" />
           </div>
           <div class="param-group">
@@ -158,12 +166,92 @@
           ▶ Run Inference
         </button>
 
+        <!-- Single-response mode -->
         <div class="response-area" id="responseArea" style="display:none">
           <div class="response-header">
             <span>Response</span>
             <div class="response-meta" id="responseMeta"></div>
           </div>
           <pre class="response-text" id="responseText"></pre>
+        </div>
+
+        <!-- Compare mode -->
+        <div id="compareArea" style="display:none">
+          <div class="speedup-banner" id="speedupBanner" style="display:none"></div>
+
+          <div class="stat-cards" id="statCards" style="display:none">
+            <div class="stat-card mesh">
+              <div class="stat-card-tag">🚀 With MeshPilot</div>
+              <div class="stat-card-big" id="statWithLatency">—</div>
+              <div class="stat-card-sub" id="statWithTps">—</div>
+              <div class="stat-card-sub" id="statWithMem"></div>
+            </div>
+            <div class="stat-card plain">
+              <div class="stat-card-tag">🐢 Without MeshPilot</div>
+              <div class="stat-card-big" id="statWithoutLatency">—</div>
+              <div class="stat-card-sub" id="statWithoutTps">—</div>
+              <div class="stat-card-sub" id="statWithoutMem"></div>
+            </div>
+          </div>
+
+          <div class="chart-block" id="chartBlock" style="display:none">
+            <div class="chart-row">
+              <div class="chart-label">Response Time <span class="chart-hint">(shorter = faster)</span></div>
+              <div class="chart-bar-item">
+                <span class="chart-bar-tag mesh">MeshPilot</span>
+                <div class="chart-bar-track"><div class="chart-bar-fill mesh" id="barLatencyWith"></div></div>
+                <span class="chart-bar-value" id="barLatencyWithVal"></span>
+              </div>
+              <div class="chart-bar-item">
+                <span class="chart-bar-tag plain">Without</span>
+                <div class="chart-bar-track"><div class="chart-bar-fill plain" id="barLatencyWithout"></div></div>
+                <span class="chart-bar-value" id="barLatencyWithoutVal"></span>
+              </div>
+            </div>
+            <div class="chart-row">
+              <div class="chart-label">Throughput <span class="chart-hint">(longer = faster)</span></div>
+              <div class="chart-bar-item">
+                <span class="chart-bar-tag mesh">MeshPilot</span>
+                <div class="chart-bar-track"><div class="chart-bar-fill mesh" id="barTpsWith"></div></div>
+                <span class="chart-bar-value" id="barTpsWithVal"></span>
+              </div>
+              <div class="chart-bar-item">
+                <span class="chart-bar-tag plain">Without</span>
+                <div class="chart-bar-track"><div class="chart-bar-fill plain" id="barTpsWithout"></div></div>
+                <span class="chart-bar-value" id="barTpsWithoutVal"></span>
+              </div>
+            </div>
+            <div class="chart-row" id="memoryChartRow" style="display:none">
+              <div class="chart-label">Memory Used <span class="chart-hint">(shorter = lighter, live from Docker)</span></div>
+              <div class="chart-bar-item">
+                <span class="chart-bar-tag mesh">MeshPilot</span>
+                <div class="chart-bar-track"><div class="chart-bar-fill mesh" id="barMemWith"></div></div>
+                <span class="chart-bar-value" id="barMemWithVal"></span>
+              </div>
+              <div class="chart-bar-item">
+                <span class="chart-bar-tag plain">Without</span>
+                <div class="chart-bar-track"><div class="chart-bar-fill plain" id="barMemWithout"></div></div>
+                <span class="chart-bar-value" id="barMemWithoutVal"></span>
+              </div>
+            </div>
+          </div>
+
+          <div class="compare-grid">
+            <div class="response-area compare-panel" id="withPanel">
+              <div class="response-header">
+                <span>🚀 With MeshPilot — response</span>
+              </div>
+              <pre class="response-text response-text-clipped" id="withText"></pre>
+              <button class="expand-toggle" id="withExpandBtn" onclick="toggleExpand('with')" style="display:none">Show full response ▾</button>
+            </div>
+            <div class="response-area compare-panel" id="withoutPanel">
+              <div class="response-header">
+                <span>🐢 Without MeshPilot — response</span>
+              </div>
+              <pre class="response-text response-text-clipped" id="withoutText"></pre>
+              <button class="expand-toggle" id="withoutExpandBtn" onclick="toggleExpand('without')" style="display:none">Show full response ▾</button>
+            </div>
+          </div>
         </div>
       </div>
     </div>

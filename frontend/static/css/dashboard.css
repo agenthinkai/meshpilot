@@ -121,6 +121,70 @@ body { font-family: var(--sans); background: var(--bg); color: var(--text); disp
 .response-meta { font-size: 12px; color: var(--text-dim); font-family: var(--mono); }
 .response-text { padding: 16px; font-family: var(--mono); font-size: 13px; line-height: 1.6; white-space: pre-wrap; word-break: break-word; color: var(--text); }
 
+.compare-toggle { margin-bottom: 16px; padding: 12px 14px; background: var(--surface2); border: 1px solid var(--border); border-radius: 8px; }
+.compare-toggle-label { display: flex; align-items: center; gap: 8px; font-size: 13px; cursor: pointer; }
+.compare-toggle-label input { accent-color: var(--accent); width: 16px; height: 16px; }
+.compare-toggle-note { font-size: 12px; color: var(--text-dim); margin-top: 6px; margin-left: 24px; }
+.compare-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; margin-top: 16px; }
+.compare-panel { margin-top: 0; }
+.compare-panel .response-text { min-height: 80px; }
+.speedup-banner {
+  margin-top: 20px; padding: 16px 18px; border-radius: 8px; text-align: center;
+  font-size: 18px; font-weight: 800; color: var(--success);
+  background: rgba(34,197,94,0.12); border: 1px solid rgba(34,197,94,0.35);
+  animation: banner-pop 0.4s ease-out;
+}
+@keyframes banner-pop {
+  0% { transform: scale(0.96); opacity: 0; }
+  100% { transform: scale(1); opacity: 1; }
+}
+
+/* ── Stat cards ──────────────────────────────────────────────────────────── */
+.stat-cards { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; margin-top: 16px; }
+.stat-card { border-radius: 10px; padding: 18px 20px; border: 1px solid var(--border); background: var(--surface2); }
+.stat-card.mesh  { border-color: rgba(59,130,246,0.4); background: rgba(59,130,246,0.08); }
+.stat-card.plain { border-color: rgba(148,163,184,0.3); background: rgba(148,163,184,0.06); }
+.stat-card-tag { font-size: 13px; font-weight: 600; color: var(--text-dim); margin-bottom: 8px; }
+.stat-card-big { font-size: 32px; font-weight: 800; font-family: var(--mono); line-height: 1.1; }
+.stat-card.mesh .stat-card-big { color: var(--accent); }
+.stat-card.plain .stat-card-big { color: var(--text-dim); }
+.stat-card-sub { font-size: 13px; color: var(--text-dim); margin-top: 6px; font-family: var(--mono); }
+
+/* ── Bar charts ──────────────────────────────────────────────────────────── */
+.chart-block { margin-top: 20px; background: var(--surface); border: 1px solid var(--border); border-radius: 10px; padding: 18px 20px; }
+.chart-row + .chart-row { margin-top: 20px; }
+.chart-label { font-size: 13px; font-weight: 600; margin-bottom: 10px; }
+.chart-hint { font-size: 11px; font-weight: 400; color: var(--text-dim); }
+.chart-bar-item { display: flex; align-items: center; gap: 10px; margin-bottom: 8px; }
+.chart-bar-tag { width: 78px; flex-shrink: 0; font-size: 12px; color: var(--text-dim); }
+.chart-bar-track { flex: 1; height: 20px; background: var(--surface2); border-radius: 5px; overflow: hidden; }
+.chart-bar-fill {
+  height: 100%; width: 0%; border-radius: 5px;
+  transition: width 0.8s cubic-bezier(0.22, 1, 0.36, 1);
+}
+.chart-bar-fill.mesh  { background: linear-gradient(90deg, var(--accent-dim), var(--accent)); }
+.chart-bar-fill.plain { background: linear-gradient(90deg, #4b5563, #6b7280); }
+.chart-bar-value { width: 90px; flex-shrink: 0; font-size: 12px; font-family: var(--mono); color: var(--text-dim); text-align: right; }
+
+/* ── Clipped response text with expand toggle ───────────────────────────── */
+.response-text-clipped { max-height: 160px; overflow: hidden; position: relative; }
+.response-text-clipped.clipped::after {
+  content: ''; position: absolute; bottom: 0; left: 0; right: 0; height: 48px;
+  background: linear-gradient(to bottom, transparent, var(--surface2));
+}
+.response-text-clipped.expanded { max-height: none; }
+.expand-toggle {
+  display: block; width: 100%; padding: 8px; background: transparent; border: none;
+  border-top: 1px solid var(--border); color: var(--accent); font-size: 12px;
+  cursor: pointer; font-family: var(--sans);
+}
+.expand-toggle:hover { background: rgba(59,130,246,0.08); }
+
+@media (max-width: 720px) {
+  .compare-grid { grid-template-columns: 1fr; }
+  .stat-cards { grid-template-columns: 1fr; }
+}
+
 /* ── Inputs & Buttons ────────────────────────────────────────────────────── */
 .input-field {
   width: 100%; padding: 10px 12px; background: var(--surface2); border: 1px solid var(--border);

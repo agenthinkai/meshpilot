@@ -40,7 +40,7 @@ services:
       dockerfile: Dockerfile
     container_name: meshpilot-api
     environment:
-      - DATABASE_URL=sqlite+aiosqlite:////data/meshpilot.db   # BUGFIX: async driver required
+      - DATABASE_URL=${DATABASE_URL:-postgresql+asyncpg://meshpilot:changeme-in-production@postgres:5432/meshpilot}
       - REDIS_URL=redis://redis:6379/0
       - MODEL_STORAGE=/models
       - SECRET_KEY=${SECRET_KEY:-changeme-in-production-32chars!!}
@@ -54,8 +54,21 @@ services:
       - sqlite-data:/data
       - ./backend:/app:ro
       - ./frontend:/app/frontend:ro
+      # Read-write: core/model_orchestrator.py creates/starts/stops/removes
+      # llama.cpp containers on demand over this socket (llama-server is
+      # single-model-per-process, so multi-model serving means dynamically
+      # spinning up one container per resident model). This is full Docker
+      # Engine API access, i.e. host-root-equivalent — acceptable for a
+      # single-operator local demo host; do not carry this into a
+      # multi-tenant or internet-facing deployment without replacing it with
+      # a scoped proxy that only allows container lifecycle ops on the
+      # meshpilot-dyn-* namespace.
+      - /var/run/docker.sock:/var/run/docker.sock
     depends_on:
-      - redis
+      redis:
+        condition: service_started
+      postgres:
+        condition: service_healthy
     restart: unless-stopped
     logging: *default-logging
     # CPU affinity hint — adjust to your NUMA topology
@@ -67,30 +80,22 @@ services:
       timeout: 10s
       retries: 3
 
-  # ── llama.cpp Inference Server ──────────────────────────────────────────────
+  # The standing `llamacpp` service that used to run here is retired.
+  # llama-server is single-model-per-process, so a single fixed service can
+  # only ever serve one GGUF at a time — the reason two models could both
+  # show status=READY while only one was truly loaded. Multi-model serving
+  # now works by starting one meshpilot-llamacpp *container instance* per
+  # resident model on demand, via core/model_orchestrator.py (see api's and
+  # worker's docker.sock mounts). This stanza keeps the `build:` context
+  # alive so `docker compose build llamacpp` still produces the
+  # meshpilot-llamacpp image the orchestrator creates instances from — the
+  # `build-only` profile means plain `docker compose up`/`build` (no
+  # profile) never starts or builds it as a standing service.
   llamacpp:
     build:
       context: ./infra/llamacpp
       dockerfile: Dockerfile
-    container_name: meshpilot-llamacpp
-    environment:
-      - LLAMA_MODEL_DIR=/models
-      - LLAMA_HOST=0.0.0.0
-      - LLAMA_PORT=8080
-      - LLAMA_THREADS=${LLAMA_THREADS:-4}
-      - LLAMA_CTX_SIZE=${LLAMA_CTX_SIZE:-4096}
-      - LLAMA_BATCH_SIZE=${LLAMA_BATCH_SIZE:-512}
-    volumes:
-      - model-storage:/models:ro
-    restart: unless-stopped
-    logging: *default-logging
-    cpuset: "0-3"
-    mem_limit: "3g"          # was 10g — caps usable model size (~3B Q4)
-    healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:8080/health"]
-      interval: 30s
-      timeout: 15s
-      retries: 5
+    profiles: ["build-only"]
 
   # ── ONNX Runtime Server ─────────────────────────────────────────────────────
   onnx:
@@ -110,6 +115,52 @@ services:
     logging: *default-logging
     cpuset: "0-3"
     mem_limit: "1g"          # was 10g
+
+  # ── PyTorch Baseline ("without MeshPilot") ─────────────────────────────────
+  # Plain transformers/PyTorch CPU inference, no quantization, no llama.cpp.
+  # Exists so the dashboard's Compare view can show a genuinely live
+  # "without MeshPilot" response instead of a canned number. Pinned to a
+  # separate cpuset from the api/onnx/worker group (0-3) and from dynamic
+  # llama.cpp instances (8-11, see core/model_orchestrator.py) so neither
+  # side of the comparison contends for the same cores.
+  pytorch-baseline:
+    build:
+      context: ./infra/pytorch-baseline
+      dockerfile: Dockerfile
+    container_name: meshpilot-pytorch-baseline
+    environment:
+      - BASELINE_MODEL_DIR=/baseline_model
+      - BASELINE_THREADS=4
+    volumes:
+      - ./baseline-models/qwen2.5-0.5b-instruct-fp32:/baseline_model:ro
+    restart: unless-stopped
+    logging: *default-logging
+    cpuset: "4-7"
+    mem_limit: "3g"
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8091/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 120s
+
+  # ── PostgreSQL (primary datastore) ──────────────────────────────────────────
+  postgres:
+    image: postgres:16-alpine
+    container_name: meshpilot-postgres
+    environment:
+      - POSTGRES_USER=${POSTGRES_USER:-meshpilot}
+      - POSTGRES_PASSWORD=${POSTGRES_PASSWORD:-changeme-in-production}
+      - POSTGRES_DB=${POSTGRES_DB:-meshpilot}
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    restart: unless-stopped
+    logging: *default-logging
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-meshpilot}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
 
   # ── Redis (task queue + caching) ────────────────────────────────────────────
   redis:
@@ -134,20 +185,34 @@ services:
     container_name: meshpilot-worker
     command: celery -A core.celery_app worker --loglevel=info --concurrency=2 -Q inference,quantize
     environment:
-      - DATABASE_URL=sqlite+aiosqlite:////data/meshpilot.db   # BUGFIX: async driver required
+      - DATABASE_URL=${DATABASE_URL:-postgresql+asyncpg://meshpilot:changeme-in-production@postgres:5432/meshpilot}
       - REDIS_URL=redis://redis:6379/0
       - MODEL_STORAGE=/models
       - SECRET_KEY=${SECRET_KEY:-changeme-in-production-32chars!!}
-      - LLAMACPP_URL=http://llamacpp:8080
       - ONNX_URL=http://onnx:8090
     volumes:
       - model-storage:/models
       - sqlite-data:/data
       - ./backend:/app:ro
+      # Same rationale as api's mount above: run_inference_task (async
+      # inference path) also calls core/model_orchestrator.py's
+      # ensure_model_running(), which needs to create/start/stop llama.cpp
+      # containers directly from the Celery worker process, not just the API.
+      - /var/run/docker.sock:/var/run/docker.sock
     depends_on:
-      - redis
-      - llamacpp
-      - onnx
+      redis:
+        condition: service_started
+      onnx:
+        condition: service_started
+      postgres:
+        condition: service_healthy
+      # worker's `command:` override skips the Dockerfile's CMD (and so
+      # never runs `alembic upgrade head` itself) — wait for api's healthy
+      # state instead, since api only starts serving /health after its own
+      # migration step completes. Prevents the worker racing ahead of api
+      # and querying tables that don't exist yet on a fresh Postgres.
+      api:
+        condition: service_healthy
     restart: unless-stopped
     logging: *default-logging
     cpuset: "0-3"
@@ -192,7 +257,8 @@ volumes:
       type: none
       o: bind
       device: ${MODEL_DIR:-/opt/meshpilot/models}   # must exist — deploy.sh creates it
-  sqlite-data:
+  sqlite-data:   # retained temporarily as a rollback reference after the Postgres migration — see backups/
+  postgres-data:
   redis-data:
   prometheus-data:
   grafana-data:

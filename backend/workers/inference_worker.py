@@ -56,8 +56,14 @@ async def _async_run(log_id: str, model_id: str, req_data: dict):
                     text = data.get("text", "")
                     tokens = data.get("tokens_generated", 0)
             else:
+                # llama-server is single-model-per-process -- ensure a dynamic
+                # instance for THIS model is running before calling it (see
+                # core/model_orchestrator.py; mirrors routers/inference.py's
+                # _call_llamacpp, which the sync/compare endpoints use).
+                from core.model_orchestrator import ensure_model_running
+                endpoint = await ensure_model_running(model)
                 async with httpx.AsyncClient(timeout=settings.INFERENCE_TIMEOUT_S) as client:
-                    resp = await client.post(f"{settings.LLAMACPP_URL}/completion", json={
+                    resp = await client.post(f"{endpoint}/completion", json={
                         "model": model.file_path,
                         "prompt": req_data["prompt"],
                         "n_predict": req_data.get("max_tokens", 512),
