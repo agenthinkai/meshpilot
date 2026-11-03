@@ -22,11 +22,14 @@ from pydantic import BaseModel, Field
 from sqlalchemy import select, desc
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from core import audit
 from core.config import settings
 from core.database import (
-    CompareRun, InferenceLog, InferenceStatus, ModelRecord, ModelStatus, User, get_db,
+    CompareRun, InferenceLog, InferenceStatus, ModelRecord, ModelStatus, PrivacyPolicy, User, get_db,
 )
-from core.model_orchestrator import container_name_for, ensure_model_running
+from core.model_orchestrator import container_memory_mb, container_name_for, ensure_model_running, fit_to_context
+from core.net_safety import UnsafeURL, ensure_public_url
+from core.privacy import scan_text
 from core.security import get_current_user_api_key, get_current_user_jwt, get_current_user
 from core.metrics import (
     INFERENCE_REQUESTS_TOTAL, INFERENCE_LATENCY_MS,
@@ -90,7 +93,7 @@ async def _call_llamacpp(model: ModelRecord, req: InferenceRequest) -> dict:
     payload = {
         "model":       model.file_path,
         "prompt":      req.prompt,
-        "n_predict":   req.max_tokens,
+        "n_predict":   await fit_to_context(endpoint, req.prompt, req.max_tokens),
         "temperature": req.temperature,
         "top_p":       req.top_p,
         "stop":        req.stop or [],
@@ -161,26 +164,19 @@ COMPARE_PROMPT_TEMPLATES = {
 }
 
 
-async def _get_container_memory_mb(container_name: str) -> Optional[float]:
-    """Read a container's current real memory usage via the Docker Engine API
-    over the mounted socket — the same figure `docker stats` shows (usage
-    minus reclaimable page cache), used for the Compare view's live memory
-    comparison."""
-    try:
-        transport = httpx.AsyncHTTPTransport(uds="/var/run/docker.sock")
-        async with httpx.AsyncClient(transport=transport, timeout=10.0) as client:
-            resp = await client.get(f"http://docker/containers/{container_name}/stats?stream=false")
-            resp.raise_for_status()
-            data = resp.json()
-            mem = data.get("memory_stats", {})
-            usage = mem.get("usage")
-            if usage is None:
-                return None
-            stats = mem.get("stats", {})
-            cache = stats.get("inactive_file", stats.get("cache", 0))
-            return round((usage - cache) / (1024 * 1024), 1)
-    except Exception:
-        return None
+async def _audit_routed(db: AsyncSession, user: User, model_id: str, prompt: str) -> dict:
+    """Records a local request before it runs, and returns the fields for its
+    outcome event. These endpoints never leave the server, so nothing is rerouted."""
+    policy = (await db.execute(select(PrivacyPolicy).where(PrivacyPolicy.id == 1))).scalar_one()
+    context = {
+        "actor_user_id": user.id, "actor_email": user.email, "model_id": model_id,
+        "route": "local", "destination": "local", "prompt_fingerprint": audit.prompt_fingerprint(prompt),
+    }
+    await audit.record_event(
+        "inference.routed", **context, reason="local model requested", status="routed",
+        sensitive=scan_text(prompt, policy.blocked_terms or []),
+    )
+    return context
 
 
 async def _call_pytorch_baseline(req: InferenceRequest) -> dict:
@@ -202,6 +198,7 @@ async def infer_sync(
     user:     User         = Depends(get_current_user),
 ):
     model = await _get_ready_model(model_id, user, db)
+    audit_context = await _audit_routed(db, user, model.id, req.prompt)
 
     log = InferenceLog(
         id=str(uuid.uuid4()), user_id=user.id, model_id=model.id,
@@ -228,6 +225,11 @@ async def infer_sync(
         TOKENS_GENERATED_TOTAL.labels(model_id=model_id, backend=result["backend_used"]).inc(result["completion_tokens"])
         THROUGHPUT_TPS.labels(model_id=model_id, backend=result["backend_used"]).set(result["throughput_tps"])
 
+        await audit.record_event(
+            "inference.completed", **audit_context, status="completed",
+            prompt_tokens=result["prompt_tokens"], completion_tokens=result["completion_tokens"],
+        )
+
         return InferenceResponse(
             id=log.id, model_id=model_id, status="completed",
             text=result["text"],
@@ -248,6 +250,7 @@ async def infer_sync(
         # the failure record before raising.
         await db.commit()
         INFERENCE_REQUESTS_TOTAL.labels(model_id=model_id, backend="unknown", status="error").inc()
+        await audit.record_event("inference.failed", **audit_context, status="failed", reason=str(e)[:200])
         raise HTTPException(502, f"Inference failed: {e}")
 
 
@@ -271,6 +274,7 @@ async def infer_compare(
             f"Compare currently supports: {', '.join(sorted(COMPARE_PROMPT_TEMPLATES))}",
         )
     model = await _get_ready_model(model_id, user, db)
+    audit_context = await _audit_routed(db, user, model.id, req.prompt)
     req = req.model_copy(update={
         "prompt": COMPARE_PROMPT_TEMPLATES[model_id].replace("{prompt}", req.prompt),
         "temperature": 0.0,
@@ -307,8 +311,8 @@ async def infer_compare(
         # reflects memory while the model is working, not idle baseline.
         await asyncio.sleep(0.4)
         return await asyncio.gather(
-            _get_container_memory_mb(container_name_for(model.id)),
-            _get_container_memory_mb("meshpilot-pytorch-baseline"),
+            container_memory_mb(container_name_for(model.id)),
+            container_memory_mb("meshpilot-pytorch-baseline"),
         )
 
     (with_result, without_result), (with_mem_mb, without_mem_mb) = await asyncio.gather(
@@ -350,6 +354,14 @@ async def infer_compare(
 
     INFERENCE_REQUESTS_TOTAL.labels(model_id=model_id, backend="compare", status="success").inc()
 
+    compare_ok = "error" not in with_result and "error" not in without_result
+    await audit.record_event(
+        "inference.completed" if compare_ok else "inference.failed", **audit_context,
+        status="completed" if compare_ok else "failed",
+        prompt_tokens=with_result.get("prompt_tokens"), completion_tokens=with_result.get("completion_tokens"),
+        detail={"endpoint": "compare"},
+    )
+
     return {
         "model_id": model_id,
         "with_meshpilot": with_result,
@@ -369,6 +381,12 @@ async def infer_async(
     user:     User         = Depends(get_current_user_api_key),
 ):
     model = await _get_ready_model(model_id, user, db)
+    if req.webhook_url:
+        try:
+            await ensure_public_url(req.webhook_url)
+        except UnsafeURL as e:
+            raise HTTPException(400, str(e))
+    audit_context = await _audit_routed(db, user, model.id, req.prompt)
 
     log = InferenceLog(
         id=str(uuid.uuid4()), user_id=user.id, model_id=model.id,
@@ -385,7 +403,7 @@ async def infer_async(
     # Dispatch to Celery
     from workers.inference_worker import run_inference_task
     run_inference_task.apply_async(
-        args=[log.id, model_id, req.model_dump()],
+        args=[log.id, model_id, req.model_dump(), audit_context],
         task_id=log.id,
         queue="inference",
     )

@@ -40,10 +40,19 @@ services:
       dockerfile: Dockerfile
     container_name: meshpilot-api
     environment:
-      - DATABASE_URL=${DATABASE_URL:-postgresql+asyncpg://meshpilot:changeme-in-production@postgres:5432/meshpilot}
+      - DATABASE_URL=${DATABASE_URL:?Set DATABASE_URL in .env}
       - REDIS_URL=redis://redis:6379/0
       - MODEL_STORAGE=/models
-      - SECRET_KEY=${SECRET_KEY:-changeme-in-production-32chars!!}
+      - SECRET_KEY=${SECRET_KEY:?Set SECRET_KEY in .env}
+      - AUDIT_HMAC_KEY=${AUDIT_HMAC_KEY:?Set AUDIT_HMAC_KEY in .env}
+      - MESHPILOT_ENV=${MESHPILOT_ENV:-production}
+      - DOCKER_PROXY_URL=http://docker-proxy:2375
+      - LOCAL_DEFAULT_MODEL=${LOCAL_DEFAULT_MODEL:-benchmark-mistral-7b}
+      - CLOUD_ROUTING_ENABLED=${CLOUD_ROUTING_ENABLED:-false}
+      - CLOUD_API_BASE=${CLOUD_API_BASE:-}
+      - CLOUD_API_KEY=${CLOUD_API_KEY:-}
+      - CLOUD_MODEL=${CLOUD_MODEL:-}
+      - CLOUD_MAX_TOKENS_PARAM=${CLOUD_MAX_TOKENS_PARAM:-max_tokens}
       - ADMIN_EMAIL=${ADMIN_EMAIL:-}
       - ADMIN_PASSWORD=${ADMIN_PASSWORD:-}
       - PROMETHEUS_MULTIPROC_DIR=/tmp/prometheus
@@ -59,20 +68,13 @@ services:
       - sqlite-data:/data
       - ./backend:/app:ro
       - ./frontend:/app/frontend:ro
-      # Read-write: core/model_orchestrator.py creates/starts/stops/removes
-      # llama.cpp containers on demand over this socket (llama-server is
-      # single-model-per-process, so multi-model serving means dynamically
-      # spinning up one container per resident model). This is full Docker
-      # Engine API access, i.e. host-root-equivalent — acceptable for a
-      # single-operator local demo host; do not carry this into a
-      # multi-tenant or internet-facing deployment without replacing it with
-      # a scoped proxy that only allows container lifecycle ops on the
-      # meshpilot-dyn-* namespace.
-      - /var/run/docker.sock:/var/run/docker.sock
+    networks: [default, docker-control]
     depends_on:
       redis:
         condition: service_started
       postgres:
+        condition: service_healthy
+      docker-proxy:
         condition: service_healthy
     restart: unless-stopped
     logging: *default-logging
@@ -83,6 +85,30 @@ services:
       test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
       interval: 30s
       timeout: 10s
+      retries: 3
+
+  # ── Docker API proxy ────────────────────────────────────────────────────────
+  # The only container that mounts the Docker socket, which is host-root
+  # equivalent. api and worker reach it over a private network and can only
+  # manage meshpilot-dyn-* containers; see infra/docker-proxy/proxy.py.
+  docker-proxy:
+    build:
+      context: ./infra/docker-proxy
+      dockerfile: Dockerfile
+    container_name: meshpilot-docker-proxy
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+    networks: [docker-control]
+    read_only: true
+    cap_drop: [ALL]
+    security_opt: ["no-new-privileges:true"]
+    restart: unless-stopped
+    logging: *default-logging
+    mem_limit: "64m"
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request as u; u.urlopen('http://localhost:2375/_health', timeout=3)"]
+      interval: 15s
+      timeout: 5s
       retries: 3
 
   # The standing `llamacpp` service that used to run here is retired.
@@ -155,7 +181,7 @@ services:
     container_name: meshpilot-postgres
     environment:
       - POSTGRES_USER=${POSTGRES_USER:-meshpilot}
-      - POSTGRES_PASSWORD=${POSTGRES_PASSWORD:-changeme-in-production}
+      - POSTGRES_PASSWORD=${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in .env}
       - POSTGRES_DB=${POSTGRES_DB:-meshpilot}
     volumes:
       - postgres-data:/var/lib/postgresql/data
@@ -190,20 +216,24 @@ services:
     container_name: meshpilot-worker
     command: celery -A core.celery_app worker --loglevel=info --concurrency=2 -Q inference,quantize
     environment:
-      - DATABASE_URL=${DATABASE_URL:-postgresql+asyncpg://meshpilot:changeme-in-production@postgres:5432/meshpilot}
+      - DATABASE_URL=${DATABASE_URL:?Set DATABASE_URL in .env}
       - REDIS_URL=redis://redis:6379/0
       - MODEL_STORAGE=/models
-      - SECRET_KEY=${SECRET_KEY:-changeme-in-production-32chars!!}
+      - SECRET_KEY=${SECRET_KEY:?Set SECRET_KEY in .env}
+      - AUDIT_HMAC_KEY=${AUDIT_HMAC_KEY:?Set AUDIT_HMAC_KEY in .env}
+      - DOCKER_PROXY_URL=http://docker-proxy:2375
+      - CLOUD_PRICE_LABEL=${CLOUD_PRICE_LABEL:-Gemini 2.5 Flash-Lite}
+      - CLOUD_INPUT_USD_PER_M=${CLOUD_INPUT_USD_PER_M:-0.10}
+      - CLOUD_OUTPUT_USD_PER_M=${CLOUD_OUTPUT_USD_PER_M:-0.40}
+      - SERVER_PRICE_LABEL=${SERVER_PRICE_LABEL:-AWS m7i.xlarge on-demand, 4 vCPU}
+      - SERVER_USD_PER_HOUR=${SERVER_USD_PER_HOUR:-0.2016}
       - ONNX_URL=http://onnx:8090
     volumes:
       - model-storage:/models
       - sqlite-data:/data
       - ./backend:/app:ro
-      # Same rationale as api's mount above: run_inference_task (async
-      # inference path) also calls core/model_orchestrator.py's
-      # ensure_model_running(), which needs to create/start/stop llama.cpp
-      # containers directly from the Celery worker process, not just the API.
-      - /var/run/docker.sock:/var/run/docker.sock
+    # Async inference and fit reports also start llama.cpp containers.
+    networks: [default, docker-control]
     depends_on:
       redis:
         condition: service_started
@@ -243,7 +273,7 @@ services:
     image: grafana/grafana:10.4.0
     container_name: meshpilot-grafana
     environment:
-      - GF_SECURITY_ADMIN_PASSWORD=${GRAFANA_PASSWORD:-meshpilot}
+      - GF_SECURITY_ADMIN_PASSWORD=${GRAFANA_PASSWORD:?Set GRAFANA_PASSWORD in .env}
       - GF_USERS_ALLOW_SIGN_UP=false
       - GF_SERVER_ROOT_URL=http://localhost/grafana
       - GF_SERVER_SERVE_FROM_SUB_PATH=true
@@ -254,6 +284,10 @@ services:
       - prometheus
     restart: unless-stopped
     logging: *default-logging
+
+networks:
+  docker-control:
+    internal: true
 
 volumes:
   model-storage:

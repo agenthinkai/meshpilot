@@ -27,11 +27,11 @@ MAX_BYTES = int(settings.MAX_MODEL_SIZE_GB * 1024 ** 3)
 FORMAT_MAP = {
     ".gguf":        ModelFormat.GGUF,
     ".onnx":        ModelFormat.ONNX,
-    ".pt":          ModelFormat.PYTORCH,
-    ".pth":         ModelFormat.PYTORCH,
-    ".bin":         ModelFormat.PYTORCH,
     ".safetensors": ModelFormat.PYTORCH,
 }
+# These are Python pickles: loading an untrusted one can run arbitrary code.
+if settings.ALLOW_PICKLE_UPLOADS:
+    FORMAT_MAP.update({".pt": ModelFormat.PYTORCH, ".pth": ModelFormat.PYTORCH, ".bin": ModelFormat.PYTORCH})
 
 
 class ModelOut(BaseModel):

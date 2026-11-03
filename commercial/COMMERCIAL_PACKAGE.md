@@ -181,7 +181,7 @@ US export controls restrict GPU exports to GCC, India, and SE Asia. Lead times a
 **What MeshPilot does:**
 1. **Detects** your CPU (Intel Xeon, AMD EPYC, ARM Neon) and selects the optimal inference backend
 2. **Quantizes** your model to INT4/INT8 automatically on upload — no ML expertise required
-3. **Serves** inference via a standard REST API — drop-in replacement for OpenAI API calls
+3. **Serves** inference via an OpenAI-compatible REST API — existing chat and text completion code switches by changing the base URL and key (tool calling not yet supported)
 4. **Monitors** latency, throughput, and cost via a built-in Grafana dashboard
 
 **Architecture:** nginx → FastAPI → llama.cpp (GGUF INT4) / ONNX Runtime (OpenVINO) → SQLite + Redis → Prometheus

@@ -290,6 +290,11 @@ $jobScript = {
 
     $secretKey = New-RandomHex64
     $envContent = Get-Content ".env"
+    $dbPassword = New-RandomHex64
+    $envContent = $envContent -replace '^AUDIT_HMAC_KEY=.*', "AUDIT_HMAC_KEY=$(New-RandomHex64)"
+    $envContent = $envContent -replace '^GRAFANA_PASSWORD=.*', "GRAFANA_PASSWORD=$(New-RandomHex64)"
+    $envContent = $envContent -replace '^POSTGRES_PASSWORD=.*', "POSTGRES_PASSWORD=$dbPassword"
+    $envContent = $envContent -replace '^DATABASE_URL=.*', "DATABASE_URL=postgresql+asyncpg://meshpilot:$dbPassword@postgres:5432/meshpilot"
     $envContent = $envContent -replace '^SECRET_KEY=.*', "SECRET_KEY=$secretKey"
     $envContent = $envContent -replace '^ADMIN_EMAIL=.*', "ADMIN_EMAIL=$email"
     $envContent = $envContent -replace '^ADMIN_PASSWORD=.*', "ADMIN_PASSWORD=$pass"
@@ -378,8 +383,8 @@ $btnInstall.Add_Click({
         [System.Windows.Forms.MessageBox]::Show("Please enter an admin email.", "MeshPilot Installer") | Out-Null
         return
     }
-    if ($pass.Length -lt 8) {
-        [System.Windows.Forms.MessageBox]::Show("Password must be at least 8 characters.", "MeshPilot Installer") | Out-Null
+    if ($pass.Length -lt 12) {
+        [System.Windows.Forms.MessageBox]::Show("Password must be at least 12 characters.", "MeshPilot Installer") | Out-Null
         return
     }
     if ($pass -ne $pass2) {

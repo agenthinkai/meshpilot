@@ -11,7 +11,7 @@ from datetime import datetime, timezone
 from typing import Optional
 
 from sqlalchemy import (
-    Boolean, Column, DateTime, Enum, Float, ForeignKey,
+    BigInteger, Boolean, Column, DateTime, Enum, Float, ForeignKey,
     Integer, String, Text, JSON, Index,
 )
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
@@ -248,6 +248,72 @@ class CompareRun(Base):
 
     __table_args__ = (
         Index("ix_compare_run_user", "user_id"),
+    )
+
+
+class PrivacyPolicy(Base):
+    """The single row of routing rules (id is always 1). See core/privacy.py."""
+    __tablename__ = "privacy_policies"
+
+    id                   = Column(Integer, primary_key=True, default=1)
+    cloud_enabled        = Column(Boolean, nullable=False, default=False)
+    on_sensitive         = Column(String(16), nullable=False, default="local")  # "local" | "block"
+    blocked_terms        = Column(JSON, nullable=False, default=list)
+    auto_cloud_min_chars = Column(Integer, nullable=True)   # null = `auto` always stays local
+    updated_at           = Column(DateTime(timezone=True), nullable=True)
+    updated_by           = Column(String(255), nullable=True)
+
+
+class AuditEvent(Base):
+    """Append-only, hash-chained record of who did what and where data went.
+    Written only through core/audit.py; a database trigger refuses changes."""
+    __tablename__ = "audit_events"
+
+    seq                = Column(BigInteger, primary_key=True, autoincrement=True)
+    created_at         = Column(DateTime(timezone=True), nullable=False)
+    event_type         = Column(String(64), nullable=False)
+    actor_user_id      = Column(String(36), nullable=True)   # no foreign key: outlives the user
+    actor_email        = Column(String(255), nullable=True)
+    actor_key_prefix   = Column(String(16), nullable=True)
+    request_id         = Column(String(36), nullable=True)
+    model_id           = Column(String(64), nullable=True)
+    route              = Column(String(16), nullable=True)   # local | cloud | blocked
+    destination        = Column(String(255), nullable=True)
+    reason             = Column(Text, nullable=True)
+    sensitive          = Column(JSON, nullable=True)         # {category: count}, never the values
+    prompt_fingerprint = Column(String(64), nullable=True)
+    prompt_tokens      = Column(Integer, nullable=True)
+    completion_tokens  = Column(Integer, nullable=True)
+    status             = Column(String(32), nullable=True)
+    detail             = Column(JSON, nullable=True)
+    prev_hash          = Column(String(64), nullable=False)
+    hash               = Column(String(64), nullable=False)
+
+    __table_args__ = (
+        Index("ix_audit_created", "created_at"),
+        Index("ix_audit_actor", "actor_user_id"),
+        Index("ix_audit_route", "route"),
+    )
+
+
+class FitRun(Base):
+    """One fit report: the customer's test cases and the results on each model."""
+    __tablename__ = "fit_runs"
+
+    id           = Column(String(36), primary_key=True, default=lambda: str(uuid.uuid4()))
+    user_id      = Column(String(36), ForeignKey("users.id"), nullable=True)
+    name         = Column(String(200), nullable=False)
+    status       = Column(String(16), nullable=False, default="pending")
+    suite        = Column(JSON, nullable=False)
+    model_ids    = Column(JSON, nullable=False)
+    progress     = Column(JSON, nullable=True)
+    report       = Column(JSON, nullable=True)
+    error        = Column(Text, nullable=True)
+    created_at   = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
+    completed_at = Column(DateTime(timezone=True), nullable=True)
+
+    __table_args__ = (
+        Index("ix_fit_run_user", "user_id"),
     )
 
 

@@ -26,6 +26,12 @@
       <li><a href="#" class="nav-link" data-page="models">
         <span class="nav-icon">🧠</span> Models
       </a></li>
+      <li><a href="#" class="nav-link" data-page="fit">
+        <span class="nav-icon">🎯</span> Fit Report
+      </a></li>
+      <li><a href="#" class="nav-link" data-page="governance">
+        <span class="nav-icon">🛡️</span> Privacy &amp; Audit
+      </a></li>
       <li><a href="#" class="nav-link" data-page="apikeys">
         <span class="nav-icon">🔑</span> API Keys
       </a></li>
@@ -279,11 +285,11 @@
       <div id="uploadModal" class="modal" style="display:none">
         <div class="modal-content">
           <h3>Upload Model</h3>
-          <p class="modal-sub">Supported: GGUF, ONNX, PyTorch (.pt, .bin, .safetensors)</p>
+          <p class="modal-sub">Supported: GGUF, ONNX, Safetensors</p>
           <input type="text" id="uploadName" placeholder="Model name" class="input-field" />
           <input type="text" id="uploadDesc" placeholder="Description (optional)" class="input-field" />
           <div class="file-drop" id="fileDrop" onclick="document.getElementById('fileInput').click()">
-            <input type="file" id="fileInput" accept=".gguf,.onnx,.pt,.pth,.bin,.safetensors"
+            <input type="file" id="fileInput" accept=".gguf,.onnx,.safetensors"
               onchange="handleFileSelect(this)" style="display:none" />
             <span id="fileDropText">Click or drag to upload model file</span>
           </div>
@@ -295,6 +301,110 @@
             <button class="btn-secondary" onclick="hideUploadModal()">Cancel</button>
             <button class="btn-primary" onclick="uploadModel()">Upload & Quantize</button>
           </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- ── Fit Report page ───────────────────────────────────────────────── -->
+    <div id="page-fit" class="page" style="display:none">
+      <div class="page-header">
+        <h2>🎯 Fit Report</h2>
+        <span class="header-sub">Which model works on your documents, on this hardware, and what it would cost</span>
+      </div>
+      <div class="section-card">
+        <h3>Test suite</h3>
+        <p class="api-note">Each case is a prompt from the customer's own work and what a right answer must contain. Everything runs on this server. A sample with fictional data is loaded below.</p>
+        <textarea id="fitSuite" class="input-field code-input" rows="14" spellcheck="false"></textarea>
+        <div class="form-actions">
+          <button class="btn-primary" onclick="startFitRun()">▶ Run fit report</button>
+          <button class="btn-secondary" onclick="loadFitSample()">Load sample</button>
+          <label class="btn-secondary">Open file<input type="file" accept=".json" onchange="loadFitFile(this)" hidden /></label>
+          <span id="fitMessage" class="form-message"></span>
+        </div>
+      </div>
+      <div class="section-card">
+        <h3>Reports</h3>
+        <div class="table-scroll"><table class="data-table">
+          <thead><tr><th>Name</th><th>Status</th><th>Started</th><th></th></tr></thead>
+          <tbody id="fitRunsBody"><tr><td colspan="4">Loading...</td></tr></tbody>
+        </table></div>
+      </div>
+      <div id="fitReport"></div>
+    </div>
+
+    <!-- ── Privacy & Audit page ──────────────────────────────────────────── -->
+    <div id="page-governance" class="page" style="display:none">
+      <div class="page-header">
+        <h2>🛡️ Privacy &amp; Audit</h2>
+        <span class="header-sub">Where each request ran, and the record to prove it</span>
+      </div>
+      <div id="governanceAdminOnly" class="section-card" style="display:none">
+        <p class="api-note">Only administrators can view this page.</p>
+      </div>
+      <div id="governanceContent">
+        <div id="cloudStatus" class="route-banner"></div>
+
+        <div class="stats-grid">
+          <div class="stat-card"><div class="stat-label">Stayed on this server</div><div class="stat-value" id="auditLocal">—</div><div class="stat-sub">requests</div></div>
+          <div class="stat-card"><div class="stat-label">Sent to cloud</div><div class="stat-value" id="auditCloud">—</div><div class="stat-sub">requests</div></div>
+          <div class="stat-card"><div class="stat-label">Blocked</div><div class="stat-value" id="auditBlocked">—</div><div class="stat-sub">requests</div></div>
+          <div class="stat-card"><div class="stat-label">Sensitive data kept local</div><div class="stat-value" id="auditSensitive">—</div><div class="stat-sub">requests</div></div>
+        </div>
+
+        <div class="section-card">
+          <h3>Try the detector</h3>
+          <textarea id="scanText" class="input-field" rows="3" placeholder="Paste text to see what would be detected. It isn't stored.">Customer Priya, card 4111 1111 1111 1111, email priya@example.com, asked about her overdraft fee.</textarea>
+          <div class="form-actions"><button class="btn-secondary" onclick="tryScan()">Check text</button></div>
+          <div id="scanResult" class="route-banner" style="margin-top:12px"></div>
+        </div>
+
+        <div class="section-card">
+          <h3>Routing policy</h3>
+          <label class="policy-check"><input type="checkbox" id="policyCloud" /> Allow requests to go to the cloud provider</label>
+          <div class="policy-grid">
+            <div class="param-group">
+              <label for="policyOnSensitive">If a cloud request contains sensitive data</label>
+              <select id="policyOnSensitive" class="input-field">
+                <option value="local">Run it on this server instead</option>
+                <option value="block">Refuse the request</option>
+              </select>
+            </div>
+            <div class="param-group">
+              <label for="policyAutoChars">Characters at which "auto" requests go to the cloud</label>
+              <input type="number" id="policyAutoChars" class="input-field" min="1" placeholder="Empty: auto always stays local" />
+            </div>
+          </div>
+          <div class="param-group">
+            <label for="policyTerms">Blocked terms, one per line (customer names, project names)</label>
+            <textarea id="policyTerms" class="input-field" rows="4"></textarea>
+          </div>
+          <div class="form-actions">
+            <button class="btn-primary" onclick="savePolicy()">Save policy</button>
+            <span id="policyMessage" class="form-message"></span>
+          </div>
+        </div>
+
+        <div class="section-card">
+          <div class="section-title-row">
+            <h3>Audit trail</h3>
+            <div class="form-actions">
+              <select id="auditRoute" class="input-field" onchange="loadAuditEvents()">
+                <option value="">All events</option>
+                <option value="local">Local</option>
+                <option value="cloud">Cloud</option>
+                <option value="blocked">Blocked</option>
+              </select>
+              <button class="btn-secondary" onclick="verifyAudit()">Verify integrity</button>
+              <button class="btn-secondary" onclick="exportAudit('csv')">Export CSV</button>
+              <button class="btn-secondary" onclick="exportAudit('jsonl')">Export JSONL</button>
+            </div>
+          </div>
+          <div id="auditVerify" class="route-banner"></div>
+          <p class="api-note">Prompts are never stored here: only a fingerprint, and counts of what was detected.</p>
+          <div class="table-scroll"><table class="data-table">
+            <thead><tr><th>#</th><th>Time</th><th>Event</th><th>Who</th><th>Route</th><th>Sensitive data</th><th>Reason</th></tr></thead>
+            <tbody id="auditBody"><tr><td colspan="7">Loading...</td></tr></tbody>
+          </table></div>
         </div>
       </div>
     </div>
@@ -328,6 +438,18 @@
         <a href="/api/docs" target="_blank" class="btn-secondary">Open Swagger UI ↗</a>
       </div>
       <div class="section-card">
+        <h3>Use it from existing OpenAI code</h3>
+        <pre class="code-block">
+from openai import OpenAI
+
+client = OpenAI(base_url="https://your-meshpilot.host/v1", api_key="mp_your_key_here")
+
+reply = client.chat.completions.create(
+    model="benchmark-qwen25-05b",   # a local model id, or "auto"
+    messages=[{"role": "user", "content": "Explain CPU-only AI inference in one sentence."}],
+)
+print(reply.choices[0].message.content)
+        </pre>
         <h3>Quick Start</h3>
         <pre class="code-block">
 # 1. Get an API key from the API Keys page
@@ -383,5 +505,6 @@ curl .../api/v1/models/{model_id} -H "Authorization: Bearer {jwt_token}"
   </main>
 
   <script src="/static/js/app.js"></script>
+  <script src="/static/js/platform.js"></script>
 </body>
 </html>

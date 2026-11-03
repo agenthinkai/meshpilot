@@ -64,7 +64,6 @@ cd /root/meshpilot-upload
 read -rsp 'Choose a MeshPilot admin password: ' P && \
   sed -i "s|^ADMIN_PASSWORD=.*|ADMIN_PASSWORD=$P|" .env && \
   sed -i "s|^GRAFANA_PASSWORD=.*|GRAFANA_PASSWORD=$P|" .env && \
-  sed -i "s|^GRAFANA_ADMIN_PASSWORD=.*|GRAFANA_ADMIN_PASSWORD=$P|" .env && \
   unset P && echo && echo "password set"
 ```
 

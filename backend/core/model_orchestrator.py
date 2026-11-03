@@ -4,10 +4,9 @@ Dynamic multi-model serving orchestrator.
 llama-server is single-model-per-process (infra/llamacpp/start.sh takes one
 --model and one --port, no loop over multiple models). This module is what
 makes serving more than one GGUF model at a time possible anyway: it starts a
-short-lived llama.cpp container per model on demand, over the same Docker
-socket already used elsewhere for read-only container stats
-(routers/inference.py:_get_container_memory_mb), and evicts the
-least-recently-used instance once MAX_CONCURRENT_INSTANCES are resident.
+short-lived llama.cpp container per model on demand, through the scoped Docker
+proxy (infra/docker-proxy/proxy.py), and evicts the least-recently-used instance
+once MAX_CONCURRENT_INSTANCES are resident.
 
 ModelInstance rows are the source of truth for "is this model actually being
 served right now" — model_records.status=READY only means the weights are on
@@ -25,6 +24,7 @@ import httpx
 from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 
+from core.config import settings
 from core.database import AsyncSessionLocal, InstanceStatus, ModelInstance, ModelRecord
 
 MAX_CONCURRENT_INSTANCES = 2
@@ -38,14 +38,24 @@ CONTAINER_PORT = 8080
 # either for the same cores.
 DYNAMIC_CPUSET = "8-11"
 
+# One slot gives a request the whole 4096-token context, instead of a quarter of
+# it. Documents matter more here than parallelism: an instance only has 4 threads
+# to share anyway, and requests beyond the first wait their turn.
+PARALLEL_SLOTS = 1
+
+# Tokens kept free for the chat template, which /tokenize doesn't see.
+CONTEXT_RESERVE_TOKENS = 32
+
 STARTUP_TIMEOUT_S = 180.0
 POLL_INTERVAL_S = 1.0
 
-_docker_transport = httpx.AsyncHTTPTransport(uds="/var/run/docker.sock")
+
+class PromptTooLong(ValueError):
+    pass
 
 
 def _docker_client() -> httpx.AsyncClient:
-    return httpx.AsyncClient(transport=_docker_transport, base_url="http://docker", timeout=30.0)
+    return httpx.AsyncClient(base_url=settings.DOCKER_PROXY_URL, timeout=30.0)
 
 
 def container_name_for(model_id: str) -> str:
@@ -61,6 +71,46 @@ def _resource_limits(parameters_b: Optional[float]) -> tuple[str, int]:
     params = parameters_b or 1.0
     mem_gb = max(1.0, params * 0.7 + 1.0)
     return DYNAMIC_CPUSET, int(mem_gb * 1024 * 1024 * 1024)
+
+
+async def container_memory_mb(container_name: str) -> Optional[float]:
+    """A container's current real memory use, the same figure `docker stats`
+    shows (usage minus reclaimable page cache). None if it can't be read."""
+    try:
+        async with _docker_client() as client:
+            resp = await client.get(f"/containers/{container_name}/stats", params={"stream": "false"})
+            resp.raise_for_status()
+            mem = resp.json().get("memory_stats", {})
+        usage = mem.get("usage")
+        if usage is None:
+            return None
+        stats = mem.get("stats", {})
+        cache = stats.get("inactive_file", stats.get("cache", 0))
+        return round((usage - cache) / (1024 * 1024), 1)
+    except Exception:
+        return None
+
+
+async def fit_to_context(endpoint: str, text: str, max_tokens: int) -> int:
+    """Returns how many tokens may be generated, reduced if needed to fit.
+
+    llama-server silently drops the middle of a prompt longer than its per-request
+    context and answers as if it had read everything, so that's refused here. If
+    the check itself can't run, the request goes ahead rather than failing."""
+    try:
+        async with httpx.AsyncClient(timeout=30.0) as client:
+            props = (await client.get(f"{endpoint}/props")).json()
+            tokens = (await client.post(f"{endpoint}/tokenize", json={"content": text})).json()["tokens"]
+        n_ctx = props["default_generation_settings"]["n_ctx"]
+    except (httpx.HTTPError, ValueError, KeyError):
+        return max_tokens
+    available = n_ctx - len(tokens) - CONTEXT_RESERVE_TOKENS
+    if available < 1:
+        raise PromptTooLong(
+            f"This prompt is about {len(tokens)} tokens, but this model can read at most "
+            f"{n_ctx - CONTEXT_RESERVE_TOKENS - 1} per request. Shorten it or split it into parts."
+        )
+    return min(max_tokens, available)
 
 
 async def _get_instance(db, model_id: str) -> Optional[ModelInstance]:
@@ -93,6 +143,7 @@ async def _create_and_start_container(client: httpx.AsyncClient, model: ModelRec
             "LLAMA_THREADS=4",
             "LLAMA_CTX_SIZE=4096",
             "LLAMA_BATCH_SIZE=512",
+            f"LLAMA_PARALLEL={PARALLEL_SLOTS}",
             f"LLAMA_MODEL_FILE={model_filename}",
         ],
         "HostConfig": {

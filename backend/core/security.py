@@ -11,7 +11,7 @@ import string
 from datetime import datetime, timedelta, timezone
 from typing import Optional
 
-from fastapi import Depends, HTTPException, Security, status
+from fastapi import Depends, HTTPException, Request, Security, status
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer, APIKeyHeader
 from jose import JWTError, jwt
 from passlib.context import CryptContext
@@ -181,6 +181,38 @@ async def get_current_user(
     user = jwt_user or api_key_user
     if not user:
         raise HTTPException(status_code=401, detail="Authentication required (Bearer token or X-API-Key)")
+    return user
+
+
+async def get_openai_user(
+    request: Request,
+    credentials: Optional[HTTPAuthorizationCredentials] = Security(bearer_scheme),
+    api_key: Optional[str] = Security(api_key_header),
+    db: AsyncSession = Depends(get_db),
+) -> User:
+    """OpenAI clients send their key as a Bearer token, so `Authorization: Bearer
+    mp_...` means an API key here. X-API-Key and dashboard JWTs also work."""
+    token = credentials.credentials if credentials else api_key
+    if not token:
+        raise HTTPException(status_code=401, detail="Missing API key. Send it as: Authorization: Bearer mp_...")
+    if not token.startswith(settings.API_KEY_PREFIX):
+        return await get_current_user_jwt(credentials, db)
+
+    result = await db.execute(
+        select(APIKey).where(APIKey.key_hash == hash_api_key(token), APIKey.is_active == True)
+    )
+    record = result.scalar_one_or_none()
+    now = datetime.now(timezone.utc)
+    if not record or (record.expires_at and record.expires_at <= now):
+        raise HTTPException(status_code=401, detail="Invalid or revoked API key")
+    record.last_used = now
+    record.requests_count = (record.requests_count or 0) + 1
+
+    result = await db.execute(select(User).where(User.id == record.user_id, User.is_active == True))
+    user = result.scalar_one_or_none()
+    if not user:
+        raise HTTPException(status_code=401, detail="Invalid or revoked API key")
+    request.state.api_key_prefix = record.key_prefix
     return user
 
 

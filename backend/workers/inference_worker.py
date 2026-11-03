@@ -12,12 +12,22 @@ from core.config import settings
 
 
 @celery_app.task(name="workers.inference_worker.run_inference_task", bind=True, max_retries=2)
-def run_inference_task(self, log_id: str, model_id: str, req_data: dict):
+def run_inference_task(self, log_id: str, model_id: str, req_data: dict, audit_context: dict | None = None):
     """Run inference asynchronously and update the InferenceLog record."""
-    asyncio.run(_async_run(log_id, model_id, req_data))
+    asyncio.run(_async_run_and_clean_up(log_id, model_id, req_data, audit_context))
 
 
-async def _async_run(log_id: str, model_id: str, req_data: dict):
+async def _async_run_and_clean_up(log_id: str, model_id: str, req_data: dict, audit_context: dict | None):
+    from core.database import engine
+    try:
+        await _async_run(log_id, model_id, req_data, audit_context)
+    finally:
+        # asyncio.run gives each task a new event loop; pooled connections can't cross loops.
+        await engine.dispose()
+
+
+async def _async_run(log_id: str, model_id: str, req_data: dict, audit_context: dict | None):
+    from core import audit
     from core.database import AsyncSessionLocal, InferenceLog, InferenceStatus, ModelRecord, ModelStatus
     from sqlalchemy import select
 
@@ -34,6 +44,8 @@ async def _async_run(log_id: str, model_id: str, req_data: dict):
             log.status = InferenceStatus.FAILED
             log.error_message = "Model not ready"
             await db.commit()
+            if audit_context:
+                await audit.record_event("inference.failed", **audit_context, status="failed", reason="Model not ready")
             return
 
         log.status = InferenceStatus.RUNNING
@@ -60,13 +72,13 @@ async def _async_run(log_id: str, model_id: str, req_data: dict):
                 # instance for THIS model is running before calling it (see
                 # core/model_orchestrator.py; mirrors routers/inference.py's
                 # _call_llamacpp, which the sync/compare endpoints use).
-                from core.model_orchestrator import ensure_model_running
+                from core.model_orchestrator import ensure_model_running, fit_to_context
                 endpoint = await ensure_model_running(model)
                 async with httpx.AsyncClient(timeout=settings.INFERENCE_TIMEOUT_S) as client:
                     resp = await client.post(f"{endpoint}/completion", json={
                         "model": model.file_path,
                         "prompt": req_data["prompt"],
-                        "n_predict": req_data.get("max_tokens", 512),
+                        "n_predict": await fit_to_context(endpoint, req_data["prompt"], req_data.get("max_tokens", 512)),
                         "temperature": req_data.get("temperature", 0.7),
                         "top_p": req_data.get("top_p", 0.9),
                         "stop": req_data.get("stop", []),
@@ -99,10 +111,21 @@ async def _async_run(log_id: str, model_id: str, req_data: dict):
             log.error_message = str(e)[:500]
 
         await db.commit()
+        if audit_context:
+            completed = log.status == InferenceStatus.COMPLETED
+            await audit.record_event(
+                "inference.completed" if completed else "inference.failed", **audit_context,
+                status="completed" if completed else "failed",
+                completion_tokens=log.completion_tokens,
+                reason=None if completed else (log.error_message or "")[:200],
+            )
 
 
 async def _fire_webhook(url: str, payload: dict):
+    from core.net_safety import ensure_public_url
     try:
+        # Checked again here: DNS can change after the request was accepted.
+        await ensure_public_url(url)
         async with httpx.AsyncClient(timeout=10) as client:
             await client.post(url, json=payload)
     except Exception:

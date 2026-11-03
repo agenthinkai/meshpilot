@@ -36,7 +36,8 @@ cd meshpilot
 
 # 2. Copy environment template
 cp .env.example .env
-# Edit .env: set SECRET_KEY, ADMIN_EMAIL, ADMIN_PASSWORD
+# Edit .env: set every change-me value to a random secret, plus ADMIN_EMAIL.
+# The API refuses to start in production while any placeholder remains.
 
 # 3. Start all services
 docker compose up -d
@@ -187,6 +188,96 @@ Dashboard statistics (requests, latency, throughput, CPU profile).
 
 ---
 
+## 🔌 OpenAI-Compatible API
+
+Existing OpenAI code can switch by changing the base URL and key:
+
+```python
+from openai import OpenAI
+
+client = OpenAI(base_url="http://localhost:8100/v1", api_key="mp_your_key_here")
+reply = client.chat.completions.create(
+    model="benchmark-qwen25-05b",
+    messages=[{"role": "user", "content": "Explain CPU-only inference in one sentence."}],
+)
+```
+
+Supported: `GET /v1/models`, `POST /v1/chat/completions` (with streaming) and
+`POST /v1/completions` (local models only). Tool calling and `n` above 1 aren't
+supported yet and return a clear 400 error. ONNX-backend models aren't available
+on `/v1` yet. Answers come from the local model rather than OpenAI's, so check
+quality on your own tasks with a fit report before switching.
+
+Each model reads up to about 4,000 tokens per request. Longer prompts get a clear
+400 error rather than being silently cut. Each model handles one request at a
+time and later requests wait, so several slow requests together can reach
+`INFERENCE_TIMEOUT_S`. To favour simultaneous users over document length, change
+`PARALLEL_SLOTS` in `backend/core/model_orchestrator.py`.
+
+---
+
+## 🛡️ Privacy Gateway and Audit Trail
+
+`model` chooses where a request may run:
+
+| `model` value | Where it runs |
+|---|---|
+| A local model id or slug | Always on this server |
+| `auto` | Locally, unless an admin sets a length threshold and the request qualifies for the cloud |
+| `cloud` | The configured provider, if allowed; otherwise it's kept local or refused |
+
+A request reaches the cloud only if **all** of these hold:
+
+1. `CLOUD_ROUTING_ENABLED=true` in the server's environment, with `CLOUD_API_BASE`,
+   `CLOUD_API_KEY` and `CLOUD_MODEL` set. Dashboard admins can't change this.
+2. The dashboard policy allows cloud routing. It's off by default.
+3. No sensitive data was detected, no blocked term matched, and every part of
+   the request could be scanned.
+
+Only message roles, message text and standard generation settings are forwarded.
+The `X-MeshPilot-Route` and `X-MeshPilot-Reason` response headers say what happened.
+
+**What detection covers:** email addresses, payment cards, IBANs, phone numbers,
+US SSNs, Emirates IDs, Aadhaar and PAN numbers, long account-style numbers, and
+credentials. **It doesn't recognise names or street addresses.** Add known
+customer and project names as blocked terms, and leave cloud routing off where
+any leak would be unacceptable: pattern matching is not a guarantee.
+
+**Audit trail:** every request, login, API key change and policy change is
+recorded under Privacy & Audit, with export to CSV or JSONL. Prompts and answers
+aren't stored, only a keyed fingerprint and counts of what was detected. Rows are
+append-only and chained with an HMAC keyed by `AUDIT_HMAC_KEY`, so an edit or
+deletion in the middle shows up under **Verify integrity**. To detect removal of
+the newest rows too, keep the reported head hash somewhere off this server. Back
+up `AUDIT_HMAC_KEY` apart from database backups: verification needs it.
+
+---
+
+## 🎯 Fit Report
+
+Tests each local model on a customer's own tasks and reports the best model per
+task, speed, memory, estimated capacity and estimated cost against cloud list
+prices. Open **Fit Report** in the dashboard, or see
+[`backend/core/fit_sample.json`](backend/core/fit_sample.json) for the format.
+
+Each case has a `task`, a `prompt` and an `expect` block using any of:
+
+| Check | Passes when |
+|---|---|
+| `exact` | The whole answer is one of these values |
+| `contains_all` | Each group has at least one match, e.g. `[["2317"], ["no customer data", "no data"]]` |
+| `json_fields` | The answer is JSON and each named field contains an expected value |
+| `declines` | The answer says the information isn't available |
+| `max_sentences` | The answer is no longer than this |
+
+Results are a guide, not a benchmark: scoring is automated, capacity assumes one
+request at a time per server and isn't load tested, and costs are estimates. The
+report repeats these caveats and shows every raw answer for review. Test
+documents are kept until the report is deleted, and runs don't count toward the
+dashboard's totals.
+
+---
+
 ## 🔧 Configuration
 
 ### Environment Variables (`.env`)
@@ -195,7 +286,9 @@ Dashboard statistics (requests, latency, throughput, CPU profile).
 # Security
 SECRET_KEY=your-secret-key-min-32-chars
 ADMIN_EMAIL=admin@yourcompany.com
-ADMIN_PASSWORD=change-me-in-production
+ADMIN_PASSWORD=at-least-12-characters
+AUDIT_HMAC_KEY=a-different-random-secret
+MESHPILOT_ENV=production   # development allows placeholders, for local testing only
 
 # Inference
 LLAMA_THREADS=4          # CPU threads for llama.cpp

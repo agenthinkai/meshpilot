@@ -51,6 +51,8 @@ function navigateTo(page) {
   else if (page === 'models') loadModels();
   else if (page === 'apikeys') loadAPIKeys();
   else if (page === 'demo') loadDemoModels();
+  else if (page === 'fit') loadFit();
+  else if (page === 'governance') loadGovernance();
 }
 
 function showPage(page) {
@@ -236,7 +238,7 @@ async function loadModels() {
     state.models = models;
     renderModels(models);
   } catch (e) {
-    document.getElementById('modelsList').innerHTML = `<p style="color:var(--error)">${e.message}</p>`;
+    document.getElementById('modelsList').innerHTML = `<p style="color:var(--error)">${esc(e.message)}</p>`;
   }
 }
 
@@ -248,14 +250,14 @@ function renderModels(models) {
   }
   grid.innerHTML = models.map(m => `
     <div class="model-card">
-      <div class="model-name">${m.name}</div>
+      <div class="model-name">${esc(m.name)}</div>
       <div class="model-meta">
-        ${m.format || 'unknown'} · ${m.quant_bits || 'FP32'} · ${m.file_size_mb ? m.file_size_mb + 'MB' : '?'}
+        ${esc(m.format || 'unknown')} · ${esc(m.quant_bits || 'FP32')} · ${m.file_size_bytes ? Math.round(m.file_size_bytes / 1048576) + 'MB' : '?'}
       </div>
       <div class="model-tags">
-        <span class="badge badge-${m.status === 'ready' ? 'ready' : m.status === 'error' ? 'error' : 'pending'}">${m.status}</span>
+        <span class="badge badge-${m.status === 'ready' ? 'ready' : m.status === 'error' ? 'error' : 'pending'}">${esc(m.status)}</span>
         ${m.is_public ? '<span class="tag">Public</span>' : '<span class="tag">Private</span>'}
-        ${m.backend ? `<span class="tag">${m.backend}</span>` : ''}
+        ${m.backend ? `<span class="tag">${esc(m.backend)}</span>` : ''}
       </div>
     </div>
   `).join('');
@@ -536,11 +538,11 @@ async function loadAPIKeys() {
     }
     tbody.innerHTML = keys.map(k => `
       <tr>
-        <td>${k.name}</td>
-        <td><code>${k.prefix}…</code></td>
-        <td>${fmt(k.request_count || 0)}</td>
-        <td>${k.last_used_at ? new Date(k.last_used_at).toLocaleDateString() : 'Never'}</td>
-        <td><button class="btn-sm" onclick="revokeKey('${k.id}')">Revoke</button></td>
+        <td>${esc(k.name)}</td>
+        <td><code>${esc(k.key_prefix)}…</code></td>
+        <td>${fmt(k.requests_count || 0)}</td>
+        <td>${k.last_used ? new Date(k.last_used).toLocaleDateString() : 'Never'}</td>
+        <td>${k.is_active ? `<button class="btn-sm" onclick="revokeKey('${esc(k.id)}')">Revoke</button>` : 'Revoked'}</td>
       </tr>
     `).join('');
   } catch (e) {

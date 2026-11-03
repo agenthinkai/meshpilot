@@ -10,6 +10,7 @@ from pydantic import BaseModel
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from core import audit
 from core.database import InferenceLog, ModelRecord, User, UserRole, UserTier, get_db
 from core.security import require_admin
 
@@ -78,6 +79,11 @@ async def update_user(
             raise HTTPException(400, f"Invalid tier: {body.tier}")
     if body.is_active is not None:
         user.is_active = body.is_active
+
+    await audit.record_event(
+        "user.updated", actor_user_id=admin.id, actor_email=admin.email, status="updated",
+        detail={"target_user": user.id, **body.model_dump(exclude_none=True)},
+    )
 
     return UserAdminOut(
         id=user.id, email=user.email, username=user.username,

@@ -10,6 +10,9 @@ PORT="${LLAMA_PORT:-8080}"
 THREADS="${LLAMA_THREADS:-4}"
 CTX_SIZE="${LLAMA_CTX_SIZE:-4096}"
 BATCH_SIZE="${LLAMA_BATCH_SIZE:-512}"
+# The context is divided equally between parallel slots, so fewer slots means
+# more room per request. Requests beyond this number wait their turn.
+PARALLEL="${LLAMA_PARALLEL:-1}"
 
 echo "[MeshPilot llama.cpp] Starting server..."
 echo "  Model dir:  $MODEL_DIR"
@@ -51,5 +54,5 @@ exec llama-server \
     --n-gpu-layers 0 \
     --mlock \
     --log-disable \
-    --parallel 4 \
+    --parallel "$PARALLEL" \
     --cont-batching

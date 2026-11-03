@@ -24,10 +24,7 @@ COPY . .
 RUN mkdir -p /data /models /tmp/prometheus
 
 # Non-root user for security
-# Also added to the root group (gid 0) so it can read/write the bind-mounted
-# docker.sock (owned root:root on the Docker Desktop VM) — needed only for
-# the Compare view's live container-memory stats lookup.
-RUN useradd -r -s /bin/false -G 0 meshpilot && \
+RUN useradd -r -s /bin/false meshpilot && \
     chown -R meshpilot:meshpilot /app /tmp/prometheus /data /models
 USER meshpilot
 

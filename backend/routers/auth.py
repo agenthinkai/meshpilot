@@ -6,20 +6,32 @@ import hashlib
 from datetime import datetime, timezone
 from typing import List, Optional
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, Request, status
 from pydantic import BaseModel, EmailStr
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from core import audit
 from core.database import APIKey, User, UserTier, get_db
+from core.ratelimit import check_login_allowed, clear_login_failures, record_login_failure
 from core.security import (
     create_access_token,
     generate_api_key,
+    hash_password,
     verify_password,
     get_current_user_jwt,
 )
 
 router = APIRouter()
+
+# Verified against when the email is unknown, so response time doesn't reveal
+# which accounts exist.
+_DUMMY_PASSWORD_HASH = hash_password("meshpilot-no-such-user")
+
+
+def _client_ip(request: Request) -> str:
+    # nginx sets this, and the API isn't reachable except through nginx.
+    return request.headers.get("x-real-ip") or (request.client.host if request.client else "unknown")
 
 
 # ── Schemas ───────────────────────────────────────────────────────────────────
@@ -71,14 +83,23 @@ class CreateAPIKeyResponse(BaseModel):
 # ── Endpoints ─────────────────────────────────────────────────────────────────
 
 @router.post("/login", response_model=TokenResponse)
-async def login(body: LoginRequest, db: AsyncSession = Depends(get_db)):
+async def login(body: LoginRequest, request: Request, db: AsyncSession = Depends(get_db)):
+    ip = _client_ip(request)
+    await check_login_allowed(body.email, ip)
+
     result = await db.execute(select(User).where(User.email == body.email))
     user = result.scalar_one_or_none()
-    if not user or not verify_password(body.password, user.hashed_password):
+    password_ok = verify_password(body.password, user.hashed_password if user else _DUMMY_PASSWORD_HASH)
+    if not user or not password_ok:
+        await record_login_failure(body.email, ip)
+        await audit.record_event("auth.login_failed", actor_email=body.email, status="failed", detail={"ip": ip})
         raise HTTPException(401, "Invalid credentials")
     if not user.is_active:
         raise HTTPException(403, "Account disabled")
 
+    await clear_login_failures(body.email, ip)
+    await audit.record_event("auth.login", actor_user_id=user.id, actor_email=user.email,
+                             status="success", detail={"ip": ip})
     user.last_login = datetime.now(timezone.utc)
     token = create_access_token({"sub": user.id, "role": user.role.value})
     return TokenResponse(
@@ -115,6 +136,8 @@ async def create_api_key(
     api_key = APIKey(user_id=user.id, key_hash=key_hash, key_prefix=key_prefix, name=body.name)
     db.add(api_key)
     await db.flush()
+    await audit.record_event("api_key.created", actor_user_id=user.id, actor_email=user.email,
+                             actor_key_prefix=key_prefix, status="created", detail={"name": body.name})
 
     return CreateAPIKeyResponse(id=api_key.id, name=api_key.name, api_key=full_key, prefix=key_prefix)
 
@@ -141,3 +164,5 @@ async def revoke_api_key(
     if not key:
         raise HTTPException(404, "API key not found")
     key.is_active = False
+    await audit.record_event("api_key.revoked", actor_user_id=user.id, actor_email=user.email,
+                             actor_key_prefix=key.key_prefix, status="revoked", detail={"name": key.name})

@@ -94,7 +94,14 @@ if [[ -f .env ]]; then
 else
     [[ -f .env.example ]] || die "no .env and no .env.example to copy from"
     cp .env.example .env
-    warn "created .env from .env.example — you MUST fill in SECRET_KEY / ADMIN_PASSWORD"
+    db_password="$(openssl rand -hex 32)"
+    sed -i "s|^SECRET_KEY=.*|SECRET_KEY=$(openssl rand -hex 32)|" .env
+    sed -i "s|^AUDIT_HMAC_KEY=.*|AUDIT_HMAC_KEY=$(openssl rand -hex 32)|" .env
+    sed -i "s|^GRAFANA_PASSWORD=.*|GRAFANA_PASSWORD=$(openssl rand -hex 32)|" .env
+    sed -i "s|^POSTGRES_PASSWORD=.*|POSTGRES_PASSWORD=$db_password|" .env
+    sed -i "s|^DATABASE_URL=.*|DATABASE_URL=postgresql+asyncpg://meshpilot:$db_password@postgres:5432/meshpilot|" .env
+    unset db_password
+    warn "created .env with generated secrets — you MUST set ADMIN_EMAIL / ADMIN_PASSWORD"
 fi
 chmod 600 .env
 ok ".env permissions set to 600"

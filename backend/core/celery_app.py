@@ -9,7 +9,7 @@ celery_app = Celery(
     backend=settings.REDIS_URL,
     # BUGFIX: workers/webhook_worker.py does not exist in this repo — including
     # it made the celery worker die at startup with ModuleNotFoundError.
-    include=["workers.inference_worker", "workers.quantize_worker"],
+    include=["workers.inference_worker", "workers.quantize_worker", "workers.fit_worker"],
 )
 
 celery_app.conf.update(
@@ -20,6 +20,7 @@ celery_app.conf.update(
     enable_utc=True,
     task_routes={
         "workers.inference_worker.*": {"queue": "inference"},
+        "workers.fit_worker.*":       {"queue": "inference"},
         "workers.quantize_worker.*":  {"queue": "quantize"},
     },
     task_acks_late=True,

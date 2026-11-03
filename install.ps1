@@ -50,11 +50,11 @@ while ([string]::IsNullOrWhiteSpace($adminEmail)) {
 }
 
 $adminPassword = ""
-while ($adminPassword.Length -lt 8) {
-    $secure = Read-Host "Admin password (min 8 characters)" -AsSecureString
+while ($adminPassword.Length -lt 12) {
+    $secure = Read-Host "Admin password (min 12 characters)" -AsSecureString
     $adminPassword = Read-PlainText $secure
-    if ($adminPassword.Length -lt 8) {
-        Write-Host "Password must be at least 8 characters." -ForegroundColor Yellow
+    if ($adminPassword.Length -lt 12) {
+        Write-Host "Password must be at least 12 characters." -ForegroundColor Yellow
     }
 }
 
@@ -142,6 +142,11 @@ Copy-Item .env.example .env -Force
 
 $secretKey = New-RandomHex64
 $envContent = Get-Content .env
+$dbPassword = New-RandomHex64
+$envContent = $envContent -replace '^AUDIT_HMAC_KEY=.*', "AUDIT_HMAC_KEY=$(New-RandomHex64)"
+$envContent = $envContent -replace '^GRAFANA_PASSWORD=.*', "GRAFANA_PASSWORD=$(New-RandomHex64)"
+$envContent = $envContent -replace '^POSTGRES_PASSWORD=.*', "POSTGRES_PASSWORD=$dbPassword"
+$envContent = $envContent -replace '^DATABASE_URL=.*', "DATABASE_URL=postgresql+asyncpg://meshpilot:$dbPassword@postgres:5432/meshpilot"
 $envContent = $envContent -replace '^SECRET_KEY=.*', "SECRET_KEY=$secretKey"
 $envContent = $envContent -replace '^ADMIN_EMAIL=.*', "ADMIN_EMAIL=$adminEmail"
 $envContent = $envContent -replace '^ADMIN_PASSWORD=.*', "ADMIN_PASSWORD=$adminPassword"
