@@ -17,6 +17,9 @@ let state = {
 // ── Init ──────────────────────────────────────────────────────────────────
 document.addEventListener('DOMContentLoaded', () => {
   setupNavigation();
+  setInterval(() => {
+    if (state.token && state.currentPage === 'dashboard') loadSavings('savingsDash');
+  }, 5000);
   if (state.token) {
     showApp();
   } else {
@@ -121,12 +124,66 @@ async function loadDashboard() {
     console.error('Dashboard load failed:', e);
   }
 
+  loadSavings('savingsDash');
+
   try {
     const history = await apiFetch('/api/v1/inference/history?limit=10');
     renderHistory(history);
   } catch (e) {
     console.error('History load failed:', e);
   }
+}
+
+function fmtUsd(v) {
+  if (v == null) return '—';
+  return v >= 1 ? `$${v.toFixed(2)}` : `$${v.toFixed(v >= 0.01 ? 4 : 6)}`;
+}
+
+function fmtDuration(s) {
+  if (s == null) return '—';
+  if (s < 60) return `${s.toFixed(1)}s`;
+  if (s < 3600) return `${(s / 60).toFixed(1)} min`;
+  return `${(s / 3600).toFixed(1)} hr`;
+}
+
+async function loadSavings(targetId) {
+  try {
+    renderSavings(targetId, await apiFetch('/api/v1/metrics/savings'));
+  } catch (e) {
+    console.error('Savings load failed:', e);
+  }
+}
+
+function renderSavings(targetId, s) {
+  const card = (label, kind, big, sub) => `
+    <div class="savings-card">
+      <div class="savings-head"><span>${label}</span><span class="savings-kind ${kind === 'Estimate' ? 'estimate' : ''}">${kind}</span></div>
+      <div class="savings-big">${big}</div>
+      <div class="savings-sub">${sub}</div>
+    </div>`;
+  const cards = [];
+  if (s.compare_runs) {
+    cards.push(card('Speed', 'Measured', `${s.speedup_x}x faster`,
+      `${s.mesh_tps} vs ${s.baseline_tps} tokens/s over ${fmt(s.compare_runs)} run${s.compare_runs === 1 ? '' : 's'}`));
+    cards.push(card('Compute time saved', 'Measured', fmtDuration(s.compute_seconds_saved),
+      'Time PyTorch would have needed for the same tokens, minus MeshPilot\'s time'));
+    if (s.memory_reduction_pct != null) {
+      cards.push(card('Memory', 'Measured', `${s.memory_reduction_pct}% less`,
+        `${fmtMem(s.mesh_memory_mb)} vs ${fmtMem(s.baseline_memory_mb)}, sampled during generation`));
+    }
+    cards.push(card('Compute cost per 1M tokens', 'Estimate', fmtUsd(s.mesh_usd_per_m_tokens),
+      `vs ${fmtUsd(s.baseline_usd_per_m_tokens)} on PyTorch (${s.compute_cost_reduction_pct}% lower), one request at a time, at $${s.server_usd_per_hour}/hr (${s.server_price_label})`));
+  }
+  cards.push(card('Tokens kept on-premises', 'Measured', fmt(s.tokens_on_prem),
+    'Prompt and generated tokens processed on this server, none sent to a cloud API'));
+  cards.push(card('Same tokens on a cloud API', 'Estimate', fmtUsd(s.cloud_usd),
+    `${s.cloud_price_label} list price, $${s.cloud_usd_per_m_input} in / $${s.cloud_usd_per_m_output} out per 1M. Local compute so far: ${fmtUsd(s.local_compute_usd)}`));
+
+  const note = s.compare_runs
+    ? 'Baseline: the same model in plain PyTorch (FP32) with the same thread count, prompt and token limit, on this machine.'
+    : 'Tick Compare on the Live Demo page to measure speed, memory and compute cost.';
+  document.getElementById(targetId).innerHTML =
+    `<div class="savings-grid">${cards.join('')}</div><div class="savings-note">${note}</div>`;
 }
 
 function renderCPUProfile(cpu) {
@@ -461,6 +518,7 @@ async function runCompare(modelId, headers, body) {
       banner.textContent = text;
       banner.style.display = 'block';
     }
+    await loadSavings('savingsCompare');
   } catch (e) {
     setupClip('withText', `Error: ${e.message}`);
     setupClip('withoutText', '');

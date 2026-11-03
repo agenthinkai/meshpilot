@@ -102,6 +102,11 @@
       </div>
 
       <div class="section-card">
+        <h3>Savings vs plain PyTorch</h3>
+        <div id="savingsDash"></div>
+      </div>
+
+      <div class="section-card">
         <h3>CPU Profile</h3>
         <div id="cpuProfile" class="cpu-profile-grid">Loading...</div>
       </div>
@@ -234,6 +239,11 @@
                 <span class="chart-bar-value" id="barMemWithoutVal"></span>
               </div>
             </div>
+          </div>
+
+          <div class="savings-block">
+            <div class="chart-label">Running totals <span class="chart-hint">(all comparison runs so far)</span></div>
+            <div id="savingsCompare"></div>
           </div>
 
           <div class="compare-grid">

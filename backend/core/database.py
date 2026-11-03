@@ -228,6 +228,29 @@ class ModelInstance(Base):
     )
 
 
+class CompareRun(Base):
+    """One successful 'with vs without MeshPilot' run. These rows are the
+    measured source for the savings panel's speed, memory and cost figures."""
+    __tablename__ = "compare_runs"
+
+    id                         = Column(String(36), primary_key=True, default=lambda: str(uuid.uuid4()))
+    user_id                    = Column(String(36), ForeignKey("users.id"), nullable=True)
+    model_id                   = Column(String(36), ForeignKey("model_records.id"), nullable=False)
+    mesh_prompt_tokens         = Column(Integer, nullable=False)
+    mesh_completion_tokens     = Column(Integer, nullable=False)
+    mesh_latency_ms            = Column(Float, nullable=False)
+    mesh_memory_mb             = Column(Float, nullable=True)
+    baseline_prompt_tokens     = Column(Integer, nullable=False)
+    baseline_completion_tokens = Column(Integer, nullable=False)
+    baseline_latency_ms        = Column(Float, nullable=False)
+    baseline_memory_mb         = Column(Float, nullable=True)
+    created_at                 = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
+
+    __table_args__ = (
+        Index("ix_compare_run_user", "user_id"),
+    )
+
+
 class Webhook(Base):
     __tablename__ = "webhooks"
 

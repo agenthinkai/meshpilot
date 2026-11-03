@@ -180,6 +180,17 @@ body { font-family: var(--sans); background: var(--bg); color: var(--text); disp
 }
 .expand-toggle:hover { background: rgba(59,130,246,0.08); }
 
+/* ── Savings panel ───────────────────────────────────────────────────────── */
+.savings-block { margin-top: 20px; background: var(--surface); border: 1px solid var(--border); border-radius: 10px; padding: 18px 20px; }
+.savings-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 12px; }
+.savings-card { background: var(--surface2); border: 1px solid var(--border); border-radius: 8px; padding: 14px 16px; }
+.savings-head { display: flex; justify-content: space-between; align-items: center; gap: 8px; font-size: 12px; color: var(--text-dim); margin-bottom: 8px; }
+.savings-kind { font-size: 10px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.04em; padding: 2px 6px; border-radius: 4px; color: var(--success); background: rgba(34,197,94,0.12); }
+.savings-kind.estimate { color: var(--warning); background: rgba(245,158,11,0.12); }
+.savings-big { font-size: 24px; font-weight: 800; font-family: var(--mono); line-height: 1.2; overflow-wrap: anywhere; }
+.savings-sub { font-size: 12px; color: var(--text-dim); margin-top: 6px; line-height: 1.5; }
+.savings-note { font-size: 12px; color: var(--text-dim); margin-top: 12px; line-height: 1.5; }
+
 @media (max-width: 720px) {
   .compare-grid { grid-template-columns: 1fr; }
   .stat-cards { grid-template-columns: 1fr; }

@@ -189,21 +189,31 @@ async def ensure_model_running(model: ModelRecord) -> str:
                 instance = await _get_instance(db, model.id)
 
     if instance is not None and instance.status == InstanceStatus.READY:
+        # A READY row can outlive its container (host reboot, compose down), so
+        # confirm the container is really running before handing out its URL.
+        async with _docker_client() as client:
+            existing = await _find_container(client, name)
+        running = existing is not None and existing.get("State") == "running"
         async with AsyncSessionLocal() as db:
             live = await _get_instance(db, model.id)
             if live is not None:
-                live.last_used_at = datetime.now(timezone.utc)
+                if running:
+                    live.last_used_at = datetime.now(timezone.utc)
+                else:
+                    live.status = InstanceStatus.STARTING
                 await db.commit()
-        return endpoint
+        if running:
+            return endpoint
 
     async with _docker_client() as client:
         existing = await _find_container(client, name)
         if existing is None:
             await _create_and_start_container(client, model, name)
         elif existing.get("State") != "running":
-            resp = await client.post(f"/containers/{name}/start")
-            if resp.status_code not in (204, 304):
-                resp.raise_for_status()
+            # Recreate rather than restart: a stopped container can reference
+            # a network that compose has since removed and recreated.
+            await _stop_and_remove_container(client, name)
+            await _create_and_start_container(client, model, name)
 
     await _wait_healthy(endpoint)
 

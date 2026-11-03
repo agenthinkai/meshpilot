@@ -24,7 +24,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from core.config import settings
 from core.database import (
-    InferenceLog, InferenceStatus, ModelRecord, ModelStatus, User, get_db,
+    CompareRun, InferenceLog, InferenceStatus, ModelRecord, ModelStatus, User, get_db,
 )
 from core.model_orchestrator import container_name_for, ensure_model_running
 from core.security import get_current_user_api_key, get_current_user_jwt, get_current_user
@@ -150,9 +150,15 @@ async def _run_inference(model: ModelRecord, req: InferenceRequest) -> dict:
 
 
 # Models with both a llamacpp (INT4 GGUF) side AND a matching plain-PyTorch
-# FP32 baseline deployed, keyed by model_id -> whether the baseline is ready.
-# Compare only ever runs the SAME underlying model on both sides.
-COMPARE_AVAILABLE_MODEL_IDS = {"benchmark-qwen25-05b"}
+# FP32 baseline deployed, keyed by model_id -> the chat prompt format. Compare
+# only ever runs the SAME underlying model on both sides, and sends both the
+# identical formatted prompt, so token counts and speeds stay comparable.
+COMPARE_PROMPT_TEMPLATES = {
+    "benchmark-qwen25-05b": (
+        "<|im_start|>system\nYou are Qwen, created by Alibaba Cloud. You are a helpful assistant.<|im_end|>\n"
+        "<|im_start|>user\n{prompt}<|im_end|>\n<|im_start|>assistant\n"
+    ),
+}
 
 
 async def _get_container_memory_mb(container_name: str) -> Optional[float]:
@@ -179,7 +185,7 @@ async def _get_container_memory_mb(container_name: str) -> Optional[float]:
 
 async def _call_pytorch_baseline(req: InferenceRequest) -> dict:
     """Call the standing 'without MeshPilot' baseline server (plain PyTorch, FP32)."""
-    payload = {"prompt": req.prompt, "max_tokens": req.max_tokens, "temperature": req.temperature}
+    payload = {"prompt": req.prompt, "max_tokens": req.max_tokens, "temperature": req.temperature, "raw_prompt": True}
     async with httpx.AsyncClient(timeout=settings.INFERENCE_TIMEOUT_S) as client:
         resp = await client.post(f"{settings.PYTORCH_BASELINE_URL}/generate", json=payload)
         resp.raise_for_status()
@@ -256,14 +262,27 @@ async def infer_compare(
 ):
     """Runs the SAME model two ways and returns both: through MeshPilot
     (llama.cpp, INT4 GGUF) and through plain PyTorch (FP32, no MeshPilot).
-    Both calls fire concurrently so neither side waits on the other."""
-    if model_id not in COMPARE_AVAILABLE_MODEL_IDS:
+    Both calls fire concurrently so neither side waits on the other. Temperature
+    is forced to 0 because the baseline always generates greedily."""
+    if model_id not in COMPARE_PROMPT_TEMPLATES:
         raise HTTPException(
             400,
             f"No 'without MeshPilot' baseline is deployed for this model yet. "
-            f"Compare currently supports: {', '.join(sorted(COMPARE_AVAILABLE_MODEL_IDS))}",
+            f"Compare currently supports: {', '.join(sorted(COMPARE_PROMPT_TEMPLATES))}",
         )
     model = await _get_ready_model(model_id, user, db)
+    req = req.model_copy(update={
+        "prompt": COMPARE_PROMPT_TEMPLATES[model_id].replace("{prompt}", req.prompt),
+        "temperature": 0.0,
+    })
+
+    # Finish any cold start first, so the memory sample below finds a container
+    # and both sides begin generating together. A failure here resurfaces as
+    # the "with" side's error when _run_inference retries it.
+    try:
+        await ensure_model_running(model)
+    except Exception:
+        pass
 
     async def _with_meshpilot():
         t0 = time.perf_counter()
@@ -302,15 +321,32 @@ async def infer_compare(
     if without_mem_mb is not None:
         without_result["memory_mb"] = without_mem_mb
 
+    # Tokens per second, not total response time: the two sides can stop at
+    # different token counts, which would otherwise distort the ratio.
     speedup = None
-    if with_result.get("wall_clock_ms") and without_result.get("wall_clock_ms"):
-        speedup = round(without_result["wall_clock_ms"] / with_result["wall_clock_ms"], 2)
+    if with_result.get("throughput_tps") and without_result.get("throughput_tps"):
+        speedup = round(with_result["throughput_tps"] / without_result["throughput_tps"], 2)
 
     memory_reduction_pct = None
     if with_result.get("memory_mb") and without_result.get("memory_mb"):
         memory_reduction_pct = round(
             (1 - with_result["memory_mb"] / without_result["memory_mb"]) * 100, 1
         )
+
+    if "error" not in with_result and "error" not in without_result:
+        db.add(CompareRun(
+            user_id=user.id, model_id=model_id,
+            mesh_prompt_tokens=with_result["prompt_tokens"],
+            mesh_completion_tokens=with_result["completion_tokens"],
+            mesh_latency_ms=with_result["latency_ms"],
+            mesh_memory_mb=with_mem_mb,
+            baseline_prompt_tokens=without_result["prompt_tokens"],
+            baseline_completion_tokens=without_result["completion_tokens"],
+            baseline_latency_ms=without_result["latency_ms"],
+            baseline_memory_mb=without_mem_mb,
+        ))
+        # Commit now: the page reloads its savings totals as soon as this returns.
+        await db.commit()
 
     INFERENCE_REQUESTS_TOTAL.labels(model_id=model_id, backend="compare", status="success").inc()
 

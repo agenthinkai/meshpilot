@@ -43,6 +43,7 @@ class GenerateRequest(BaseModel):
     prompt: str
     max_tokens: int = 256
     temperature: float = 0.0
+    raw_prompt: bool = False  # prompt is already formatted; skip the chat template
 
 
 @app.get("/health")
@@ -50,11 +51,14 @@ async def health():
     return {"status": "ok", "model_loaded": state["model"] is not None}
 
 
-def _generate_sync(prompt: str, max_tokens: int) -> dict:
+def _generate_sync(prompt: str, max_tokens: int, raw_prompt: bool = False) -> dict:
     tokenizer = state["tokenizer"]
     model = state["model"]
-    messages = [{"role": "user", "content": prompt}]
-    input_text = tokenizer.apply_chat_template(messages, tokenize=False, add_generation_prompt=True)
+    if raw_prompt:
+        input_text = prompt
+    else:
+        messages = [{"role": "user", "content": prompt}]
+        input_text = tokenizer.apply_chat_template(messages, tokenize=False, add_generation_prompt=True)
     inputs = tokenizer(input_text, return_tensors="pt")
     prompt_tokens = inputs["input_ids"].shape[1]
 
@@ -83,4 +87,4 @@ def _generate_sync(prompt: str, max_tokens: int) -> dict:
 
 @app.post("/generate")
 async def generate(req: GenerateRequest):
-    return await anyio.to_thread.run_sync(_generate_sync, req.prompt, req.max_tokens)
+    return await anyio.to_thread.run_sync(_generate_sync, req.prompt, req.max_tokens, req.raw_prompt)

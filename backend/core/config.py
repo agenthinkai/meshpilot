@@ -51,6 +51,14 @@ class Settings(BaseSettings):
     DEMO_MODEL_HF_REPO: str = "bartowski/Llama-3.2-1B-Instruct-GGUF"
     DEMO_MODEL_FILENAME: str = "Llama-3.2-1B-Instruct-Q4_K_M.gguf"
 
+    # Savings panel pricing. These are list prices used for labelled estimates,
+    # not measurements; override per customer through the environment.
+    CLOUD_PRICE_LABEL: str = "Gemini 2.5 Flash-Lite"
+    CLOUD_INPUT_USD_PER_M: float = 0.10
+    CLOUD_OUTPUT_USD_PER_M: float = 0.40
+    SERVER_PRICE_LABEL: str = "AWS m7i.xlarge on-demand, 4 vCPU"
+    SERVER_USD_PER_HOUR: float = 0.2016
+
     # Admin bootstrap (optional — creates an admin user on first startup if set)
     ADMIN_EMAIL: str = ""
     ADMIN_PASSWORD: str = ""
