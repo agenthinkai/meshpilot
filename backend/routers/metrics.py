@@ -17,6 +17,53 @@ from core.cpu_detect import get_cpu_profile
 
 router = APIRouter()
 
+HOURS_PER_MONTH = 730
+CLOUD_PRICES_CHECKED = "2026-11-04"
+# Standard-tier list prices in USD per 1M tokens (label, input, output), from the
+# OpenAI, Google and Anthropic pricing pages. The price set in .env comes first.
+CLOUD_PRICE_CHOICES = [
+    ("Gemini 2.5 Flash-Lite", 0.10, 0.40),
+    ("Claude Haiku 5.5", 0.10, 0.50),
+    ("Gemini 3.1 Flash-Lite", 0.25, 1.50),
+    ("GPT-5 mini", 0.25, 2.00),
+    ("GPT-5.4 mini", 0.75, 4.50),
+    ("Claude Sonnet 5.5", 2.00, 10.00),
+]
+
+
+def cloud_comparison(label: str, usd_per_m_input: float, usd_per_m_output: float,
+                     prompt_tokens: int, completion_tokens: int,
+                     local_seconds: float, server_usd_per_month: float) -> dict:
+    """What the tokens so far would cost on a cloud model, and the monthly volume
+    at which a server paid for around the clock costs the same as that model."""
+    tokens = prompt_tokens + completion_tokens
+    cost = (prompt_tokens * usd_per_m_input + completion_tokens * usd_per_m_output) / 1_000_000
+    break_even = busy_pct = None
+    if tokens:
+        break_even = server_usd_per_month / (cost / tokens)
+        if local_seconds:
+            capacity = tokens / local_seconds * 3600 * HOURS_PER_MONTH
+            busy_pct = break_even / capacity * 100
+    return {
+        "label": label,
+        "usd_per_m_input": usd_per_m_input,
+        "usd_per_m_output": usd_per_m_output,
+        "same_tokens_usd": round(cost, 6),
+        "break_even_tokens_per_month": round(break_even) if break_even else None,
+        "busy_pct": round(busy_pct, 1) if busy_pct else None,
+    }
+
+
+class CloudOption(BaseModel):
+    label:                       str
+    usd_per_m_input:             float
+    usd_per_m_output:            float
+    same_tokens_usd:             float
+    break_even_tokens_per_month: Optional[int]
+    # Share of the month the server must be generating to reach break-even.
+    # Over 100 means it can't reach it at the speed measured so far.
+    busy_pct:                    Optional[float]
+
 
 class DashboardStats(BaseModel):
     total_requests:     int
@@ -52,6 +99,11 @@ class SavingsStats(BaseModel):
     cloud_price_label:        str
     server_usd_per_hour:      float
     server_price_label:       str
+    server_usd_per_month:     float
+    capacity_tokens_per_month:Optional[int]
+    input_share_pct:          Optional[float]
+    cloud_prices_checked:     str
+    cloud_options:            List[CloudOption]
 
 
 class LatencyBucket(BaseModel):
@@ -171,6 +223,11 @@ async def savings_stats(
     base_cost = per_m(base_tps) if both else None
     both_mem = mesh_mem and base_mem
 
+    tokens = prompt_tokens + completion_tokens
+    server_month = rate * HOURS_PER_MONTH
+    configured = (settings.CLOUD_PRICE_LABEL, settings.CLOUD_INPUT_USD_PER_M, settings.CLOUD_OUTPUT_USD_PER_M)
+    prices = [configured] + [p for p in CLOUD_PRICE_CHOICES if p[0] != configured[0]]
+
     return SavingsStats(
         compare_runs=run_count,
         mesh_tps=round(mesh_tps, 2) if both else None,
@@ -194,4 +251,12 @@ async def savings_stats(
         cloud_price_label=settings.CLOUD_PRICE_LABEL,
         server_usd_per_hour=rate,
         server_price_label=settings.SERVER_PRICE_LABEL,
+        server_usd_per_month=round(server_month, 2),
+        capacity_tokens_per_month=round(tokens / local_seconds * 3600 * HOURS_PER_MONTH) if tokens and local_seconds else None,
+        input_share_pct=round(prompt_tokens / tokens * 100, 1) if tokens else None,
+        cloud_prices_checked=CLOUD_PRICES_CHECKED,
+        cloud_options=[
+            cloud_comparison(*price, prompt_tokens, completion_tokens, local_seconds, server_month)
+            for price in prices
+        ],
     )

@@ -301,6 +301,9 @@ textarea.input-field { resize: vertical; line-height: 1.5; }
 .savings-kind.estimate { color: var(--warning); background: color-mix(in srgb, var(--warning) 13%, transparent); }
 .savings-big { font-family: var(--serif); font-size: 28px; line-height: 1.15; letter-spacing: -.01em; overflow-wrap: anywhere; }
 .savings-sub { font-size: 13px; color: var(--text-dim); margin-top: 5px; }
+.cloud-compare { margin-top: 26px; }
+.cloud-compare-head { display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 6px 16px; margin-bottom: 14px; }
+.cloud-compare-head h4 { margin: 0; font-family: var(--serif); font-size: 17px; font-weight: 400; }
 .savings-note { font-size: 13px; color: var(--text-dim); margin-top: 18px; padding-top: 14px; border-top: 1px solid var(--border); }
 
 /* ── Dialogs and messages ────────────────────────────────────────────────── */

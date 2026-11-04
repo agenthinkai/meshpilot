@@ -687,6 +687,16 @@ def test_members_cannot_see_company_numbers(api, admin_headers, path):
     assert httpx.get(url, params={"scope": "everything"}, headers=admin_headers, timeout=30).status_code == 422
 
 
+def test_savings_compare_with_the_configured_cloud_price_first(api, admin_headers):
+    savings = usage(api, admin_headers, "metrics/savings", "company")
+    options = savings["cloud_options"]
+    assert options[0]["label"] == savings["cloud_price_label"]
+    assert options[0]["same_tokens_usd"] == pytest.approx(savings["cloud_usd"])
+    assert len({o["label"] for o in options}) == len(options) > 1
+    assert savings["capacity_tokens_per_month"] > 0
+    assert all(o["busy_pct"] > 0 and o["break_even_tokens_per_month"] > 0 for o in options)
+
+
 def test_cloud_requests_do_not_count_as_kept_on_premises(api, admin_headers, key_headers):
     set_policy(api, admin_headers, cloud_enabled=True)
     try:

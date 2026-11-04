@@ -15,6 +15,7 @@ let state = {
 
 const ADMIN_PAGES = ['dashboard', 'people', 'models', 'governance', 'fit', 'demo'];
 const MEMBER_PAGES = ['chat', 'apikeys', 'docs'];
+const savingsShown = {};
 
 // ── Init ──────────────────────────────────────────────────────────────────
 document.addEventListener('DOMContentLoaded', () => {
@@ -217,13 +218,22 @@ function fmtDuration(s) {
 
 async function loadSavings(targetId) {
   try {
-    renderSavings(targetId, await apiFetch('/api/v1/metrics/savings?scope=company'));
+    const savings = await apiFetch('/api/v1/metrics/savings?scope=company');
+    // The dashboard refreshes this panel, which would close an open dropdown.
+    if (document.activeElement?.closest(`#${targetId} select`)) return;
+    renderSavings(targetId, savings);
   } catch (e) {
     console.error('Savings load failed:', e);
   }
 }
 
+function pickCloudPrice(select, targetId) {
+  try { localStorage.setItem('mp_cloud_price', select.value); } catch {}
+  renderSavings(targetId, savingsShown[targetId]);
+}
+
 function renderSavings(targetId, s) {
+  savingsShown[targetId] = s;
   const card = (label, kind, big, sub) => `
     <div class="savings-card">
       <div class="savings-head"><span>${label}</span><span class="savings-kind ${kind === 'Estimate' ? 'estimate' : ''}">${kind}</span></div>
@@ -245,14 +255,44 @@ function renderSavings(targetId, s) {
   }
   cards.push(card('Tokens kept on-premises', 'Measured', fmt(s.tokens_on_prem),
     'Prompt and generated tokens processed on this server, none sent to a cloud API'));
-  cards.push(card('Same tokens on a cloud API', 'Estimate', fmtUsd(s.cloud_usd),
-    `${s.cloud_price_label} list price, $${s.cloud_usd_per_m_input} in / $${s.cloud_usd_per_m_output} out per 1M. Local compute so far: ${fmtUsd(s.local_compute_usd)}`));
+  cards.push(card('This server', 'Estimate', `${fmtUsd(s.server_usd_per_month)}/mo`,
+    `${s.server_price_label}, paid whether it is busy or idle`));
 
   const note = s.compare_runs
     ? 'Baseline: the same model in plain PyTorch (FP32) with the same thread count, prompt and token limit, on this machine.'
     : 'Tick Compare on the Live Demo page to measure speed, memory and compute cost.';
   document.getElementById(targetId).innerHTML =
-    `<div class="savings-grid">${cards.join('')}</div><div class="savings-note">${note}</div>`;
+    `<div class="savings-grid">${cards.join('')}</div><div class="savings-note">${note}</div>${cloudComparison(targetId, s, card)}`;
+}
+
+function cloudComparison(targetId, s, card) {
+  let saved = null;
+  try { saved = localStorage.getItem('mp_cloud_price'); } catch {}
+  const choice = s.cloud_options.find(o => o.label === saved) || s.cloud_options[0];
+  const options = s.cloud_options.map(o =>
+    `<option value="${esc(o.label)}" ${o === choice ? 'selected' : ''}>${esc(o.label)}</option>`).join('');
+
+  let verdict = 'Run a few requests so MeshPilot can measure this server\'s speed.';
+  if (choice.busy_pct != null) {
+    verdict = choice.busy_pct <= 100
+      ? `This server would need to be generating ${choice.busy_pct}% of the time. Above that, it costs less than this model.`
+      : `More than this server can process at its measured speed (${fmt(s.capacity_tokens_per_month)} a month), so it won't beat this price on cost alone.`;
+  }
+  const mix = s.input_share_pct == null ? '' : ` Assumes the mix so far, ${Math.round(s.input_share_pct)}% input and ${Math.round(100 - s.input_share_pct)}% output.`;
+  return `
+    <div class="cloud-compare">
+      <div class="cloud-compare-head">
+        <h4>Against a cloud API</h4>
+        <label class="model-picker"><span class="sr-only">Cloud model to compare with</span>
+          <select onchange="pickCloudPrice(this, '${targetId}')">${options}</select></label>
+      </div>
+      <div class="savings-grid">
+        ${card('Same tokens on this model', 'Estimate', fmtUsd(choice.same_tokens_usd),
+          `${fmt(s.tokens_on_prem)} tokens at $${choice.usd_per_m_input} in / $${choice.usd_per_m_output} out per 1M`)}
+        ${card('Where this server breaks even', 'Estimate', choice.break_even_tokens_per_month == null ? '—' : `${fmt(choice.break_even_tokens_per_month)} tokens/mo`, verdict)}
+      </div>
+      <div class="savings-note">List prices checked ${esc(s.cloud_prices_checked)}.${mix} This compares cost only, and models differ in quality.</div>
+    </div>`;
 }
 
 function renderCPUProfile(cpu) {
