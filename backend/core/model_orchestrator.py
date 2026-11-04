@@ -153,6 +153,9 @@ async def _create_and_start_container(client: httpx.AsyncClient, model: ModelRec
     if not model.file_path:
         raise RuntimeError(f"Model {model.id} has no file_path set")
     model_filename = model.file_path.rsplit("/", 1)[-1]
+    # Containers look for this name at the top of the model volume.
+    if not os.path.isfile(os.path.join(settings.MODEL_STORAGE, model_filename)):
+        raise RuntimeError(f"Model file {model_filename} is not installed")
 
     create_payload = {
         "Image": LLAMACPP_IMAGE,

@@ -22,8 +22,14 @@ echo "  Batch:      $BATCH_SIZE"
 
 # Pin to a specific model file if set (avoids nondeterministic selection when
 # multiple GGUF files are present in MODEL_DIR); otherwise fall back to first found.
-if [ -n "$LLAMA_MODEL_FILE" ] && [ -f "$MODEL_DIR/$LLAMA_MODEL_FILE" ]; then
+if [ -n "$LLAMA_MODEL_FILE" ]; then
+    # Never fall back to another file: requests would be answered by a different
+    # model while everything still shows the one that was asked for.
     MODEL_PATH="$MODEL_DIR/$LLAMA_MODEL_FILE"
+    if [ ! -f "$MODEL_PATH" ]; then
+        echo "[MeshPilot llama.cpp] ERROR: $MODEL_PATH does not exist"
+        exit 1
+    fi
 else
     MODEL_PATH=$(find "$MODEL_DIR" -name "*.gguf" | sort | head -1)
 fi

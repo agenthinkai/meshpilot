@@ -67,34 +67,38 @@ curl -X POST http://localhost/api/v1/inference/sync/llama-3.2-1b-instruct \
 
 ## 🏗️ Architecture
 
+```text
+Staff browsers                 Internal apps (API keys)
+       └──────────────┬──────────────┘
+                      │ HTTPS
+              nginx (TLS, routing)
+                      │
+           MeshPilot API + dashboard
+           ├─ Sign-in, roles, people
+           ├─ Privacy gateway: decides where a request may go
+           ├─ Audit trail: tamper-checked, stores no prompt text
+           └─ Request queue: one line per model, across API workers
+                      │
+      ┌───────────────┼───────────────────┐
+llama.cpp model   llama.cpp model   Optional cloud API
+(own CPU range)   (own CPU range)   (off by default)
 ```
-┌─────────────────────────────────────────────────────────────────┐
-│                        Client / Browser                          │
-└─────────────────────────────┬───────────────────────────────────┘
-                              │ HTTP
-                    ┌─────────▼─────────┐
-                    │      nginx        │  Rate limiting, SSL, routing
-                    └─────────┬─────────┘
-                              │
-                    ┌─────────▼─────────┐
-                    │   FastAPI (API)   │  Auth, model registry, metrics
-                    │   + Frontend      │  tRPC-style typed procedures
-                    └──────┬──────┬─────┘
-                           │      │
-               ┌───────────▼┐    ┌▼──────────────┐
-               │ llama.cpp  │    │  ONNX Runtime  │
-               │ Server     │    │  + OpenVINO EP │
-               │ (GGUF INT4)│    │  (ONNX INT8)   │
-               └────────────┘    └────────────────┘
-                           │      │
-               ┌───────────▼──────▼──────────────┐
-               │  SQLite (metadata) + Redis (queue)│
-               └──────────────────────────────────┘
-                           │
-               ┌───────────▼──────────────────────┐
-               │  Prometheus + Grafana (metrics)   │
-               └──────────────────────────────────┘
-```
+
+| Supporting service | What it does |
+|---|---|
+| PostgreSQL | Accounts, API keys, usage records, audit trail |
+| Redis | Request queue, rate limits, background job broker |
+| Worker | Background jobs such as fit reports |
+| Docker proxy | Lets the API start model containers, and nothing else |
+| Prometheus + Grafana | Monitoring |
+| PyTorch baseline | The "without MeshPilot" side of Compare (Qwen only) |
+| ONNX runtime | ONNX-format models, not available through `/v1` |
+
+Chat history stays in each person's browser. Prompts are not stored on the server.
+
+Each model answers one request at a time, on its own CPU range. Up to three models
+run at once. Model files must be in the model volume, at the top level: a model whose
+file is missing refuses to start rather than loading another one.
 
 ### CPU Optimization Stack
 
