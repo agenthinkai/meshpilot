@@ -30,7 +30,7 @@ from core.database import (
 from core.model_orchestrator import container_memory_mb, container_name_for, ensure_model_running, fit_to_context
 from core.net_safety import UnsafeURL, ensure_public_url
 from core.privacy import scan_text
-from core.security import get_current_user_api_key, get_current_user_jwt, get_current_user
+from core.security import StatsScope, get_current_user_api_key, get_current_user_jwt, get_current_user, stats_filter
 from core.metrics import (
     INFERENCE_REQUESTS_TOTAL, INFERENCE_LATENCY_MS,
     INFERENCE_TTFT_MS, TOKENS_GENERATED_TOTAL, THROUGHPUT_TPS,
@@ -439,12 +439,13 @@ async def get_task(
 @router.get("/history", response_model=List[InferenceResponse])
 async def inference_history(
     limit:  int = 50,
+    scope:  StatsScope   = "mine",
     db:     AsyncSession = Depends(get_db),
     user:   User         = Depends(get_current_user),
 ):
     result = await db.execute(
         select(InferenceLog)
-        .where(InferenceLog.user_id == user.id)
+        .where(*stats_filter(InferenceLog.user_id, scope, user))
         .order_by(desc(InferenceLog.created_at))
         .limit(min(limit, 200))
     )

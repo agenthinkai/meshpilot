@@ -9,7 +9,7 @@ import hmac
 import secrets
 import string
 from datetime import datetime, timedelta, timezone
-from typing import Optional
+from typing import Literal, Optional
 
 from fastapi import Depends, HTTPException, Request, Security, status
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer, APIKeyHeader
@@ -261,3 +261,15 @@ def require_role(*roles: UserRole):
 
 
 require_admin = require_role(UserRole.ADMIN)
+
+
+StatsScope = Literal["mine", "company"]
+
+
+def stats_filter(column, scope: StatsScope, user: User) -> list:
+    """Query conditions for usage numbers. Only admins can see the whole company's."""
+    if scope == "mine":
+        return [column == user.id]
+    if user.role != UserRole.ADMIN:
+        raise HTTPException(status_code=403, detail="Only admins can see company-wide numbers")
+    return []

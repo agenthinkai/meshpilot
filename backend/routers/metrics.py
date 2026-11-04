@@ -12,7 +12,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from core.config import settings
 from core.database import CompareRun, InferenceLog, InferenceStatus, ModelRecord, User, get_db
-from core.security import get_current_user_jwt
+from core.security import StatsScope, get_current_user_jwt, stats_filter
 from core.cpu_detect import get_cpu_profile
 
 router = APIRouter()
@@ -25,6 +25,7 @@ class DashboardStats(BaseModel):
     avg_throughput_tps: Optional[float]
     total_tokens:       int
     models_count:       int
+    active_people_30d:  Optional[int] = None  # company scope only
     cpu_profile:        dict
 
 
@@ -61,47 +62,56 @@ class LatencyBucket(BaseModel):
 
 @router.get("/dashboard", response_model=DashboardStats)
 async def dashboard_stats(
-    db:   AsyncSession = Depends(get_db),
-    user: User         = Depends(get_current_user_jwt),
+    scope: StatsScope   = "mine",
+    db:    AsyncSession = Depends(get_db),
+    user:  User         = Depends(get_current_user_jwt),
 ):
-    since_24h = datetime.now(timezone.utc) - timedelta(hours=24)
+    now = datetime.now(timezone.utc)
+    scoped = stats_filter(InferenceLog.user_id, scope, user)
 
     total_req = (await db.execute(
-        select(func.count(InferenceLog.id)).where(InferenceLog.user_id == user.id)
+        select(func.count(InferenceLog.id)).where(*scoped)
     )).scalar_one()
 
     req_24h = (await db.execute(
         select(func.count(InferenceLog.id)).where(
-            InferenceLog.user_id == user.id,
-            InferenceLog.created_at >= since_24h,
+            *scoped,
+            InferenceLog.created_at >= now - timedelta(hours=24),
         )
     )).scalar_one()
 
     avg_lat = (await db.execute(
         select(func.avg(InferenceLog.latency_ms)).where(
-            InferenceLog.user_id == user.id,
+            *scoped,
             InferenceLog.status == InferenceStatus.COMPLETED,
         )
     )).scalar_one()
 
     avg_tps = (await db.execute(
         select(func.avg(InferenceLog.throughput_tps)).where(
-            InferenceLog.user_id == user.id,
+            *scoped,
             InferenceLog.status == InferenceStatus.COMPLETED,
         )
     )).scalar_one()
 
     total_tokens = (await db.execute(
-        select(func.sum(InferenceLog.completion_tokens)).where(
-            InferenceLog.user_id == user.id,
-        )
+        select(func.sum(InferenceLog.completion_tokens)).where(*scoped)
     )).scalar_one() or 0
 
+    visible_models = [] if scope == "company" else [
+        (ModelRecord.owner_id == user.id) | (ModelRecord.is_public == True)
+    ]
     models_count = (await db.execute(
-        select(func.count(ModelRecord.id)).where(
-            (ModelRecord.owner_id == user.id) | (ModelRecord.is_public == True)
-        )
+        select(func.count(ModelRecord.id)).where(*visible_models)
     )).scalar_one()
+
+    active_people = None
+    if scope == "company":
+        active_people = (await db.execute(
+            select(func.count(func.distinct(InferenceLog.user_id))).where(
+                InferenceLog.created_at >= now - timedelta(days=30),
+            )
+        )).scalar_one()
 
     return DashboardStats(
         total_requests=total_req,
@@ -110,14 +120,16 @@ async def dashboard_stats(
         avg_throughput_tps=round(avg_tps, 2) if avg_tps else None,
         total_tokens=int(total_tokens),
         models_count=models_count,
+        active_people_30d=active_people,
         cpu_profile=get_cpu_profile().to_dict(),
     )
 
 
 @router.get("/savings", response_model=SavingsStats)
 async def savings_stats(
-    db:   AsyncSession = Depends(get_db),
-    user: User         = Depends(get_current_user_jwt),
+    scope: StatsScope   = "mine",
+    db:    AsyncSession = Depends(get_db),
+    user:  User         = Depends(get_current_user_jwt),
 ):
     runs = (await db.execute(
         select(
@@ -129,7 +141,7 @@ async def savings_stats(
             func.coalesce(func.sum(CompareRun.baseline_latency_ms), 0.0),
             func.avg(CompareRun.mesh_memory_mb),
             func.avg(CompareRun.baseline_memory_mb),
-        ).where(CompareRun.user_id == user.id)
+        ).where(*stats_filter(CompareRun.user_id, scope, user))
     )).one()
     run_count, mesh_prompt, mesh_tokens, mesh_ms, base_tokens, base_ms, mesh_mem, base_mem = runs
 
@@ -139,7 +151,7 @@ async def savings_stats(
             func.coalesce(func.sum(InferenceLog.completion_tokens), 0),
             func.coalesce(func.sum(InferenceLog.latency_ms), 0.0),
         ).where(
-            InferenceLog.user_id == user.id,
+            *stats_filter(InferenceLog.user_id, scope, user),
             InferenceLog.status == InferenceStatus.COMPLETED,
         )
     )).one()

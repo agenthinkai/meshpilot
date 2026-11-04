@@ -640,6 +640,64 @@ def test_members_cannot_use_admin_features(api, admin_headers):
     assert upload.status_code == 403
 
 
+def usage(api, headers, path, scope):
+    resp = httpx.get(f"{api}/api/v1/{path}", params={"scope": scope}, headers=headers, timeout=30)
+    assert resp.status_code == 200, resp.text
+    return resp.json()
+
+
+def test_company_numbers_cover_everyone_and_people_see_only_their_own(api, admin_headers):
+    person, token = active_member(api, admin_headers)
+    member = bearer(token)
+    admin_before = usage(api, admin_headers, "metrics/dashboard", "mine")
+    company_before = usage(api, admin_headers, "metrics/dashboard", "company")
+    tokens_before = usage(api, admin_headers, "metrics/savings", "company")["tokens_on_prem"]
+    secret_prompt = "Say the word marmalade."
+
+    response = chat(api, member, LOCAL_MODEL, secret_prompt)
+    assert response.status_code == 200, response.text
+    used = response.json()["usage"]
+
+    mine = usage(api, member, "metrics/dashboard", "mine")
+    assert mine["total_requests"] == 1 and mine["active_people_30d"] is None
+    assert usage(api, admin_headers, "metrics/dashboard", "mine")["total_requests"] == admin_before["total_requests"]
+
+    company = usage(api, admin_headers, "metrics/dashboard", "company")
+    assert company["total_requests"] == company_before["total_requests"] + 1
+    assert company["requests_24h"] == company_before["requests_24h"] + 1
+    assert company["active_people_30d"] >= 1
+    savings = usage(api, admin_headers, "metrics/savings", "company")
+    assert savings["tokens_on_prem"] == tokens_before + used["prompt_tokens"] + used["completion_tokens"]
+
+    history = usage(api, admin_headers, "inference/history", "company")
+    assert history[0]["completion_tokens"] == used["completion_tokens"]
+    assert usage(api, member, "inference/history", "mine")[0]["id"] == history[0]["id"]
+    assert history[0]["id"] not in {row["id"] for row in usage(api, admin_headers, "inference/history", "mine")}
+
+    # Company numbers say how much was used, never who asked what.
+    everything = json.dumps([company, savings, history])
+    assert "marmalade" not in everything and person["email"] not in everything and person["id"] not in everything
+
+
+@pytest.mark.parametrize("path", ["metrics/dashboard", "metrics/savings", "inference/history"])
+def test_members_cannot_see_company_numbers(api, admin_headers, path):
+    _, token = active_member(api, admin_headers)
+    url = f"{api}/api/v1/{path}"
+    assert httpx.get(url, params={"scope": "company"}, headers=bearer(token), timeout=30).status_code == 403
+    assert httpx.get(url, params={"scope": "everything"}, headers=admin_headers, timeout=30).status_code == 422
+
+
+def test_cloud_requests_do_not_count_as_kept_on_premises(api, admin_headers, key_headers):
+    set_policy(api, admin_headers, cloud_enabled=True)
+    try:
+        before = usage(api, admin_headers, "metrics/savings", "company")["tokens_on_prem"]
+        response = chat(api, key_headers, "cloud", "Say hello.")
+        assert response.headers["x-meshpilot-route"] == "cloud"
+        assert usage(api, admin_headers, "metrics/savings", "company")["tokens_on_prem"] == before
+    finally:
+        set_policy(api, admin_headers)
+
+
 def test_member_can_chat_with_their_session(api, admin_headers):
     _, token = active_member(api, admin_headers)
     with httpx.stream("POST", f"{api}/v1/chat/completions", headers=bearer(token), timeout=180, json={

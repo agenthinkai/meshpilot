@@ -181,13 +181,13 @@ function hideError() {
 // ── Dashboard ─────────────────────────────────────────────────────────────
 async function loadDashboard() {
   try {
-    const stats = await apiFetch('/api/v1/metrics/dashboard');
+    const stats = await apiFetch('/api/v1/metrics/dashboard?scope=company');
     document.getElementById('statTotal').textContent   = fmt(stats.total_requests);
     document.getElementById('stat24h').textContent     = fmt(stats.requests_24h);
     document.getElementById('statLatency').textContent = fmtSeconds(stats.avg_latency_ms);
     document.getElementById('statTPS').textContent     = stats.avg_throughput_tps ? `${stats.avg_throughput_tps}` : '—';
     document.getElementById('statTokens').textContent  = fmt(stats.total_tokens);
-    document.getElementById('statModels').textContent  = stats.models_count;
+    document.getElementById('statPeople').textContent  = fmt(stats.active_people_30d);
     renderCPUProfile(stats.cpu_profile);
   } catch (e) {
     console.error('Dashboard load failed:', e);
@@ -196,7 +196,7 @@ async function loadDashboard() {
   loadSavings('savingsDash');
 
   try {
-    const history = await apiFetch('/api/v1/inference/history?limit=10');
+    const history = await apiFetch('/api/v1/inference/history?limit=10&scope=company');
     renderHistory(history);
   } catch (e) {
     console.error('History load failed:', e);
@@ -217,7 +217,7 @@ function fmtDuration(s) {
 
 async function loadSavings(targetId) {
   try {
-    renderSavings(targetId, await apiFetch('/api/v1/metrics/savings'));
+    renderSavings(targetId, await apiFetch('/api/v1/metrics/savings?scope=company'));
   } catch (e) {
     console.error('Savings load failed:', e);
   }
