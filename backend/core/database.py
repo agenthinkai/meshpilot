@@ -120,8 +120,10 @@ class User(Base):
     is_active     = Column(Boolean, default=True)
     created_at    = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
     last_login    = Column(DateTime(timezone=True), nullable=True)
+    must_change_password = Column(Boolean, default=False, nullable=False)
+    password_changed_at  = Column(DateTime(timezone=True), nullable=True)
 
-    api_keys      = relationship("APIKey",    back_populates="user", cascade="all, delete-orphan")
+    api_keys     = relationship("APIKey",    back_populates="user", cascade="all, delete-orphan")
     models        = relationship("ModelRecord", back_populates="owner")
     inferences    = relationship("InferenceLog", back_populates="user")
     webhooks      = relationship("Webhook",   back_populates="user", cascade="all, delete-orphan")

@@ -8,7 +8,7 @@ from typing import List, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Request, status
 from pydantic import BaseModel, EmailStr
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from core import audit
@@ -17,7 +17,9 @@ from core.ratelimit import check_login_allowed, clear_login_failures, record_log
 from core.security import (
     create_access_token,
     generate_api_key,
+    get_user_with_any_password,
     hash_password,
+    password_problem,
     verify_password,
     get_current_user_jwt,
 )
@@ -48,6 +50,7 @@ class TokenResponse(BaseModel):
     username:     str
     role:         str
     tier:         str
+    must_change_password: bool = False
 
 
 class UserResponse(BaseModel):
@@ -57,6 +60,12 @@ class UserResponse(BaseModel):
     role:       str
     tier:       str
     created_at: datetime
+    must_change_password: bool
+
+
+class ChangePasswordRequest(BaseModel):
+    current_password: str
+    new_password:     str
 
 
 class APIKeyResponse(BaseModel):
@@ -87,8 +96,8 @@ async def login(body: LoginRequest, request: Request, db: AsyncSession = Depends
     ip = _client_ip(request)
     await check_login_allowed(body.email, ip)
 
-    result = await db.execute(select(User).where(User.email == body.email))
-    user = result.scalar_one_or_none()
+    result = await db.execute(select(User).where(func.lower(User.email) == body.email.lower()))
+    user = result.scalars().first()
     password_ok = verify_password(body.password, user.hashed_password if user else _DUMMY_PASSWORD_HASH)
     if not user or not password_ok:
         await record_login_failure(body.email, ip)
@@ -108,14 +117,48 @@ async def login(body: LoginRequest, request: Request, db: AsyncSession = Depends
         username=user.username,
         role=user.role.value,
         tier=user.tier.value,
+        must_change_password=user.must_change_password,
     )
 
 
 @router.get("/me", response_model=UserResponse)
-async def me(user: User = Depends(get_current_user_jwt)):
+async def me(user: User = Depends(get_user_with_any_password)):
     return UserResponse(
         id=user.id, email=user.email, username=user.username,
         role=user.role.value, tier=user.tier.value, created_at=user.created_at,
+        must_change_password=user.must_change_password,
+    )
+
+
+@router.post("/change-password", response_model=TokenResponse)
+async def change_password(
+    body:    ChangePasswordRequest,
+    request: Request,
+    user:    User = Depends(get_user_with_any_password),
+):
+    ip = _client_ip(request)
+    await check_login_allowed(user.email, ip)
+    if not verify_password(body.current_password, user.hashed_password):
+        await record_login_failure(user.email, ip)
+        await audit.record_event("auth.password_change_failed", actor_user_id=user.id, actor_email=user.email,
+                                 status="failed", detail={"ip": ip})
+        raise HTTPException(400, "Your current password is incorrect")
+    problem = password_problem(body.new_password)
+    if problem:
+        raise HTTPException(400, problem)
+    if body.new_password == body.current_password:
+        raise HTTPException(400, "Choose a password you aren't using now")
+
+    await clear_login_failures(user.email, ip)
+    user.hashed_password = hash_password(body.new_password)
+    user.must_change_password = False
+    user.password_changed_at = datetime.now(timezone.utc)
+    await audit.record_event("auth.password_changed", actor_user_id=user.id, actor_email=user.email,
+                             status="success", detail={"ip": ip})
+    # Other sessions end now, so this one needs a fresh token to carry on.
+    return TokenResponse(
+        access_token=create_access_token({"sub": user.id, "role": user.role.value}),
+        user_id=user.id, username=user.username, role=user.role.value, tier=user.tier.value,
     )
 
 

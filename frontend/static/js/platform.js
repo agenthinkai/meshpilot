@@ -105,7 +105,7 @@ async function loadFitRuns() {
 }
 
 async function deleteFitRun(id) {
-  if (!confirm('Delete this report and its test documents?')) return;
+  if (!await confirmDialog('Delete this report?', 'Its test documents are deleted too.', 'Delete', true)) return;
   await apiFetch(`/api/v1/fit/runs/${id}`, 'DELETE');
   if (currentFitReport && currentFitReport.id === id) {
     currentFitReport = null;
@@ -211,10 +211,6 @@ async function showFitReport(id) {
 
 // ── Privacy & Audit ──────────────────────────────────────────────────────────
 async function loadGovernance() {
-  const isAdmin = state.user && state.user.role === 'admin';
-  document.getElementById('governanceAdminOnly').style.display = isAdmin ? 'none' : 'block';
-  document.getElementById('governanceContent').style.display = isAdmin ? 'block' : 'none';
-  if (!isAdmin) return;
   await Promise.all([loadPolicy(), loadAuditSummary(), loadAuditEvents()]);
 }
 
@@ -317,7 +313,7 @@ async function exportAudit(format) {
   const resp = await fetch(`/api/v1/governance/audit/export?format=${format}`, {
     headers: { Authorization: `Bearer ${state.token}` },
   });
-  if (!resp.ok) { alert(`Export failed (HTTP ${resp.status})`); return; }
+  if (!resp.ok) { toast(`Export failed (HTTP ${resp.status}).`, 'error'); return; }
   downloadBlob(await resp.blob(), `meshpilot-audit.${format}`);
   await loadAuditEvents();
 }

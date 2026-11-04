@@ -188,6 +188,40 @@ Dashboard statistics (requests, latency, throughput, CPU profile).
 
 ---
 
+## 🏢 Open It to Your Company
+
+Employees use MeshPilot from a browser. Nothing is installed on their computers.
+
+**1. Name the server.** In `.env`, set the names or IP addresses people will type,
+and open the HTTPS port to the network:
+
+```bash
+MESHPILOT_HOSTNAMES=meshpilot.yourcompany.local,10.0.0.25
+MESHPILOT_HTTPS_BIND=0.0.0.0
+MESHPILOT_HTTPS_PORT=443
+```
+
+Run `docker compose up -d nginx`. People connect to `https://<server>`. The plain
+HTTP port stays on the server itself.
+
+**2. Use your company's certificate.** MeshPilot creates a self-signed certificate
+so traffic is encrypted from the start, but browsers warn about it. To remove the
+warning, place `fullchain.pem` and `privkey.pem` from your IT team in
+`infra/nginx/certs/`, delete `infra/nginx/certs/.self-signed`, then run
+`docker compose restart nginx`. MeshPilot never overwrites a certificate you supply.
+
+**3. Add people.** Under **People**, an admin adds each employee and sends them the
+one-time temporary password privately. They choose their own password at first
+sign-in. Members get Chat, API keys and the API reference. Only admins can see
+Administration, upload models or run fit reports.
+
+**Chat history** is kept in each person's browser, not on the server. On a shared
+computer, anyone using the same browser profile can read it, so use **Delete all**
+before leaving. One model answers one request at a time, so use the Fit Report to
+size the server for the number of people.
+
+---
+
 ## 🔌 OpenAI-Compatible API
 
 Existing OpenAI code can switch by changing the base URL and key:

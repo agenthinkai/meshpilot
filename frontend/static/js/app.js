@@ -8,15 +8,19 @@ const API = '';  // same origin; nginx proxies /api/ to FastAPI
 // ── State ─────────────────────────────────────────────────────────────────
 let state = {
   token: localStorage.getItem('mp_token') || null,
-  apiKey: localStorage.getItem('mp_apikey') || null,
   user: null,
   models: [],
-  currentPage: 'dashboard',
+  currentPage: 'chat',
 };
+
+const ADMIN_PAGES = ['dashboard', 'people', 'models', 'governance', 'fit', 'demo'];
+const MEMBER_PAGES = ['chat', 'apikeys', 'docs'];
 
 // ── Init ──────────────────────────────────────────────────────────────────
 document.addEventListener('DOMContentLoaded', () => {
   setupNavigation();
+  document.getElementById('logoutBtn').onclick = logout;
+  try { localStorage.removeItem('mp_apikey'); } catch {}  // older versions kept keys here
   setInterval(() => {
     if (state.token && state.currentPage === 'dashboard') loadSavings('savingsDash');
   }, 5000);
@@ -35,12 +39,28 @@ function setupNavigation() {
       navigateTo(page);
     });
   });
+  window.addEventListener('hashchange', () => {
+    if (state.user && !state.user.must_change_password) {
+      const page = location.hash.slice(1);
+      if (page !== state.currentPage) navigateTo(page);
+    }
+  });
+}
+
+function isAdmin() {
+  return !!state.user && state.user.role === 'admin';
+}
+
+function defaultPage() {
+  return isAdmin() ? 'dashboard' : 'chat';
 }
 
 function navigateTo(page) {
   if (!state.token) { logout(); return; }
+  if (!MEMBER_PAGES.includes(page) && !(isAdmin() && ADMIN_PAGES.includes(page))) page = defaultPage();
 
   state.currentPage = page;
+  history.replaceState(null, '', `#${page}`);
   document.querySelectorAll('.nav-link').forEach(l => {
     l.classList.toggle('active', l.dataset.page === page);
   });
@@ -48,6 +68,8 @@ function navigateTo(page) {
 
   // Load data for the page
   if (page === 'dashboard') loadDashboard();
+  else if (page === 'chat') loadChatPage();
+  else if (page === 'people') loadPeople();
   else if (page === 'models') loadModels();
   else if (page === 'apikeys') loadAPIKeys();
   else if (page === 'demo') loadDemoModels();
@@ -56,8 +78,8 @@ function navigateTo(page) {
 }
 
 function showPage(page) {
-  const sidebar = document.querySelector('.sidebar');
-  if (sidebar) sidebar.style.display = page === 'auth' ? 'none' : '';
+  document.body.classList.toggle('no-chrome', page === 'auth' || page === 'password');
+  document.body.classList.toggle('chat-mode', page === 'chat');
   document.querySelectorAll('.page').forEach(p => p.style.display = 'none');
   const el = document.getElementById(`page-${page}`);
   if (el) el.style.display = 'block';
@@ -68,12 +90,55 @@ async function showApp() {
     const me = await apiFetch('/api/v1/auth/me');
     state.user = me;
     document.getElementById('userName').textContent = me.username || me.email;
-    document.getElementById('logoutBtn').style.display = 'inline-block';
-    document.getElementById('logoutBtn').onclick = logout;
-    loadCPUBadge();
-    navigateTo('dashboard');
+    document.getElementById('userAvatar').textContent = (me.username || me.email).charAt(0).toUpperCase();
+    document.body.classList.toggle('is-admin', me.role === 'admin');
+    if (me.must_change_password) {
+      showPasswordPage(true);
+      return;
+    }
+    if (me.role === 'admin') loadCPUBadge();
+    navigateTo(location.hash.slice(1) || defaultPage());
   } catch {
     logout();
+  }
+}
+
+function showPasswordPage(required) {
+  ['passwordCurrent', 'passwordNew', 'passwordConfirm'].forEach(id => { document.getElementById(id).value = ''; });
+  document.getElementById('passwordError').style.display = 'none';
+  document.getElementById('passwordTitle').textContent = required ? 'Choose your password' : 'Change password';
+  document.getElementById('passwordIntro').textContent = required
+    ? 'You signed in with a temporary password. Choose your own to continue.'
+    : 'Other devices will be signed out.';
+  document.getElementById('passwordCurrentLabel').textContent = required ? 'Temporary password' : 'Current password';
+  document.getElementById('passwordCancel').style.display = required ? 'none' : '';
+  document.getElementById('passwordSignOut').style.display = required ? '' : 'none';
+  showPage('password');
+  document.getElementById('passwordCurrent').focus();
+}
+
+async function submitPassword() {
+  const error = document.getElementById('passwordError');
+  const showProblem = message => {
+    error.textContent = message;
+    error.style.display = 'block';
+  };
+  const next = document.getElementById('passwordNew').value;
+  if (next !== document.getElementById('passwordConfirm').value) {
+    showProblem('The new passwords don\'t match.');
+    return;
+  }
+  try {
+    const data = await apiFetch('/api/v1/auth/change-password', 'POST', {
+      current_password: document.getElementById('passwordCurrent').value,
+      new_password: next,
+    });
+    state.token = data.access_token;
+    localStorage.setItem('mp_token', state.token);
+    toast('Your password has been saved.');
+    await showApp();
+  } catch (e) {
+    showProblem(e.message);
   }
 }
 
@@ -93,11 +158,13 @@ async function login() {
 }
 
 function logout() {
+  if (typeof chat !== 'undefined' && chat.controller) chat.controller.abort();
   state.token = null;
-  state.apiKey = null;
   state.user = null;
   localStorage.removeItem('mp_token');
-  localStorage.removeItem('mp_apikey');
+  document.body.classList.remove('is-admin');
+  document.getElementById('loginPassword').value = '';
+  history.replaceState(null, '', location.pathname);
   showPage('auth');
 }
 
@@ -117,7 +184,7 @@ async function loadDashboard() {
     const stats = await apiFetch('/api/v1/metrics/dashboard');
     document.getElementById('statTotal').textContent   = fmt(stats.total_requests);
     document.getElementById('stat24h').textContent     = fmt(stats.requests_24h);
-    document.getElementById('statLatency').textContent = stats.avg_latency_ms ? `${stats.avg_latency_ms}ms` : '—';
+    document.getElementById('statLatency').textContent = fmtSeconds(stats.avg_latency_ms);
     document.getElementById('statTPS').textContent     = stats.avg_throughput_tps ? `${stats.avg_throughput_tps}` : '—';
     document.getElementById('statTokens').textContent  = fmt(stats.total_tokens);
     document.getElementById('statModels').textContent  = stats.models_count;
@@ -207,7 +274,7 @@ function renderCPUProfile(cpu) {
   ];
   grid.innerHTML = items.map(([k, v]) => {
     const cls = v === true ? 'on' : v === false ? 'off' : '';
-    const display = v === true ? '✓ Yes' : v === false ? '✗ No' : (v ?? '—');
+    const display = v === true ? 'Yes' : v === false ? 'No' : (v ?? '—');
     return `<div class="cpu-item"><div class="cpu-key">${k}</div><div class="cpu-val ${cls}">${display}</div></div>`;
   }).join('');
 }
@@ -215,15 +282,14 @@ function renderCPUProfile(cpu) {
 function renderHistory(logs) {
   const tbody = document.getElementById('historyBody');
   if (!logs || !logs.length) {
-    tbody.innerHTML = '<tr><td colspan="7" style="color:var(--text-dim);text-align:center">No inferences yet</td></tr>';
+    tbody.innerHTML = '<tr><td colspan="6" class="empty-cell">No requests yet</td></tr>';
     return;
   }
   tbody.innerHTML = logs.map(l => `
     <tr>
-      <td>${l.id.substring(0, 8)}…</td>
-      <td>${l.model_id.substring(0, 12)}…</td>
+      <td>${esc(l.model_id)}</td>
       <td><span class="badge badge-${l.status === 'completed' ? 'success' : l.status === 'failed' ? 'error' : 'pending'}">${l.status}</span></td>
-      <td>${l.latency_ms ? l.latency_ms + 'ms' : '—'}</td>
+      <td>${fmtSeconds(l.latency_ms)}</td>
       <td>${l.throughput_tps ? l.throughput_tps + ' t/s' : '—'}</td>
       <td>${l.backend_used || '—'}</td>
       <td>${l.created_at ? new Date(l.created_at).toLocaleTimeString() : '—'}</td>
@@ -256,7 +322,7 @@ function renderModels(models) {
       </div>
       <div class="model-tags">
         <span class="badge badge-${m.status === 'ready' ? 'ready' : m.status === 'error' ? 'error' : 'pending'}">${esc(m.status)}</span>
-        ${m.is_public ? '<span class="tag">Public</span>' : '<span class="tag">Private</span>'}
+        ${m.is_public ? '<span class="tag">Everyone</span>' : '<span class="tag">Only you</span>'}
         ${m.backend ? `<span class="tag">${esc(m.backend)}</span>` : ''}
       </div>
     </div>
@@ -284,7 +350,7 @@ async function uploadModel() {
   const name = document.getElementById('uploadName').value.trim();
   const desc = document.getElementById('uploadDesc').value.trim();
   const file = document.getElementById('fileInput').files[0];
-  if (!name || !file) { alert('Name and file are required'); return; }
+  if (!name || !file) { toast('Choose a file and give it a name.', 'error'); return; }
 
   const formData = new FormData();
   formData.append('file', file);
@@ -329,7 +395,7 @@ async function loadDemoModels() {
     const ready  = models.filter(m => m.status === 'ready');
     const sel    = document.getElementById('demoModel');
     sel.innerHTML = ready.length
-      ? ready.map(m => `<option value="${m.id}">${m.name} (${m.quant_bits || 'FP32'})</option>`).join('')
+      ? ready.map(m => `<option value="${esc(m.id)}">${esc(m.name)}</option>`).join('')
       : '<option value="">No ready models — upload one first</option>';
     sel.onchange = updateCompareAvailability;
     updateCompareAvailability();
@@ -360,19 +426,17 @@ function onCompareToggle() {
 async function runDemo() {
   const modelId = document.getElementById('demoModel').value;
   const prompt  = document.getElementById('demoPrompt').value.trim();
-  if (!modelId) { alert('Select a model first'); return; }
-  if (!prompt)  { alert('Enter a prompt'); return; }
+  if (!modelId) { toast('Select a model first.', 'error'); return; }
+  if (!prompt)  { toast('Enter a prompt.', 'error'); return; }
 
   const compareMode = document.getElementById('compareMode').checked;
   const btn = document.getElementById('runBtn');
   btn.disabled = true;
-  btn.textContent = '⏳ Running...';
+  btn.textContent = 'Running…';
   document.getElementById('responseArea').style.display = 'none';
   document.getElementById('compareArea').style.display = 'none';
 
-  const headers = state.apiKey
-    ? { 'X-API-Key': state.apiKey }
-    : { 'Authorization': `Bearer ${state.token}` };
+  const headers = { 'Authorization': `Bearer ${state.token}` };
 
   const body = JSON.stringify({
     prompt,
@@ -388,7 +452,7 @@ async function runDemo() {
     }
   } finally {
     btn.disabled = false;
-    btn.textContent = '▶ Run Inference';
+    btn.textContent = 'Run';
   }
 }
 
@@ -432,7 +496,7 @@ function setupClip(id, text) {
     const overflowing = el.scrollHeight > el.clientHeight + 4;
     el.classList.toggle('clipped', overflowing);
     btn.style.display = overflowing ? 'block' : 'none';
-    btn.textContent = 'Show full response ▾';
+    btn.textContent = 'Show full response';
   });
 }
 
@@ -442,7 +506,7 @@ function toggleExpand(which) {
   const btn = document.getElementById(id.replace('Text', 'ExpandBtn'));
   const nowExpanded = el.classList.toggle('expanded');
   el.classList.toggle('clipped', !nowExpanded);
-  btn.textContent = nowExpanded ? 'Show less ▴' : 'Show full response ▾';
+  btn.textContent = nowExpanded ? 'Show less' : 'Show full response';
 }
 
 async function runCompare(modelId, headers, body) {
@@ -476,8 +540,8 @@ async function runCompare(modelId, headers, body) {
       document.getElementById('statWithTps').textContent = `${w.throughput_tps} tok/s · ${w.completion_tokens} tokens`;
       document.getElementById('statWithoutLatency').textContent = fmtSeconds(wo.wall_clock_ms);
       document.getElementById('statWithoutTps').textContent = `${wo.throughput_tps} tok/s · ${wo.completion_tokens} tokens`;
-      document.getElementById('statWithMem').textContent = fmtMem(w.memory_mb) ? `📊 ${fmtMem(w.memory_mb)} RAM (live)` : '';
-      document.getElementById('statWithoutMem').textContent = fmtMem(wo.memory_mb) ? `📊 ${fmtMem(wo.memory_mb)} RAM (live)` : '';
+      document.getElementById('statWithMem').textContent = fmtMem(w.memory_mb) ? `${fmtMem(w.memory_mb)} RAM, live` : '';
+      document.getElementById('statWithoutMem').textContent = fmtMem(wo.memory_mb) ? `${fmtMem(wo.memory_mb)} RAM, live` : '';
       document.getElementById('statCards').style.display = 'grid';
 
       // Bar charts (width % relative to the larger of the two values)
@@ -514,9 +578,9 @@ async function runCompare(modelId, headers, body) {
 
     if (data.speedup_x) {
       const banner = document.getElementById('speedupBanner');
-      let text = `⚡ MeshPilot was ${data.speedup_x}x faster`;
+      let text = `MeshPilot was ${data.speedup_x}x faster`;
       if (data.memory_reduction_pct) text += ` and used ${data.memory_reduction_pct}% less memory`;
-      text += ` — same model, same prompt, same machine`;
+      text += `. Same model, same prompt, same machine.`;
       banner.textContent = text;
       banner.style.display = 'block';
     }
@@ -533,7 +597,7 @@ async function loadAPIKeys() {
     const keys = await apiFetch('/api/v1/auth/api-keys');
     const tbody = document.getElementById('apiKeysBody');
     if (!keys || !keys.length) {
-      tbody.innerHTML = '<tr><td colspan="5" style="color:var(--text-dim);text-align:center">No API keys yet</td></tr>';
+      tbody.innerHTML = '<tr><td colspan="5" class="empty-cell">No API keys yet</td></tr>';
       return;
     }
     tbody.innerHTML = keys.map(k => `
@@ -542,7 +606,7 @@ async function loadAPIKeys() {
         <td><code>${esc(k.key_prefix)}…</code></td>
         <td>${fmt(k.requests_count || 0)}</td>
         <td>${k.last_used ? new Date(k.last_used).toLocaleDateString() : 'Never'}</td>
-        <td>${k.is_active ? `<button class="btn-sm" onclick="revokeKey('${esc(k.id)}')">Revoke</button>` : 'Revoked'}</td>
+        <td class="row-actions">${k.is_active ? `<button class="btn-sm" type="button" onclick="revokeKey('${esc(k.id)}')">Revoke</button>` : '<span class="cell-note">Revoked</span>'}</td>
       </tr>
     `).join('');
   } catch (e) {
@@ -551,33 +615,29 @@ async function loadAPIKeys() {
 }
 
 async function createAPIKey() {
-  const name = prompt('API key name (e.g. "production-server"):');
-  if (!name) return;
-  try {
-    const data = await apiFetch('/api/v1/auth/api-keys', 'POST', { name });
-    state.apiKey = data.key;
-    localStorage.setItem('mp_apikey', data.key);
-    document.getElementById('newKeyValue').textContent = data.key;
-    document.getElementById('newKeyBanner').style.display = 'flex';
-    loadAPIKeys();
-  } catch (e) {
-    alert(`Failed to create key: ${e.message}`);
-  }
+  let created = null;
+  const done = await openDialog({
+    title: 'New API key',
+    confirmLabel: 'Create key',
+    fields: [{ name: 'name', label: 'What is it for?', placeholder: 'Invoice summariser', required: true, autocomplete: 'off' }],
+    onConfirm: async values => {
+      created = await apiFetch('/api/v1/auth/api-keys', 'POST', values);
+    },
+  });
+  if (!done) return;
+  await loadAPIKeys();
+  await secretDialog('Copy your new key', 'This is the only time it will be shown. Store it somewhere safe.', created.api_key);
 }
 
 async function revokeKey(id) {
-  if (!confirm('Revoke this API key?')) return;
+  const yes = await confirmDialog('Revoke this API key?', 'Anything using it will stop working straight away.', 'Revoke', true);
+  if (!yes) return;
   try {
     await apiFetch(`/api/v1/auth/api-keys/${id}`, 'DELETE');
     loadAPIKeys();
   } catch (e) {
-    alert(`Failed to revoke: ${e.message}`);
+    toast(`Couldn't revoke the key: ${e.message}`, 'error');
   }
-}
-
-function copyKey() {
-  const key = document.getElementById('newKeyValue').textContent;
-  navigator.clipboard.writeText(key).then(() => alert('Copied!'));
 }
 
 // ── CPU Badge ─────────────────────────────────────────────────────────────
@@ -587,7 +647,7 @@ async function loadCPUBadge() {
     const cpu = stats.cpu_profile;
     if (cpu) {
       document.getElementById('cpuBadge').textContent =
-        `${cpu.recommended_backend} · ${cpu.recommended_quant}`;
+        `Running ${cpu.recommended_backend}, ${cpu.recommended_quant}.`;
     }
   } catch {}
 }
@@ -596,19 +656,130 @@ async function loadCPUBadge() {
 async function apiFetch(path, method = 'GET', body = null) {
   const headers = { 'Content-Type': 'application/json' };
   if (state.token) headers['Authorization'] = `Bearer ${state.token}`;
-  if (state.apiKey) headers['X-API-Key'] = state.apiKey;
 
   const opts = { method, headers };
   if (body) opts.body = JSON.stringify(body);
 
   const resp = await fetch(`${API}${path}`, opts);
-  if (resp.status === 401) {
+  if (resp.status === 401 && state.token) {
     logout();
-    throw new Error('Session expired — please log in again');
+    throw new Error('Your session has ended. Please sign in again.');
   }
   const data = await resp.json().catch(() => ({}));
-  if (!resp.ok) throw new Error(data.detail || `HTTP ${resp.status}`);
+  if (!resp.ok) {
+    if (resp.status === 401) throw new Error('That email and password don\'t match.');
+    // Validation errors arrive as a list, one entry per problem field.
+    const detail = Array.isArray(data.detail) ? data.detail.map(d => d.msg).join('. ') : data.detail;
+    throw new Error(detail || `The request failed (HTTP ${resp.status}).`);
+  }
   return data;
+}
+
+// ── Dialogs and messages ──────────────────────────────────────────────────
+function toast(message, kind = 'info') {
+  const el = document.createElement('div');
+  el.className = `toast ${kind}`;
+  el.textContent = message;
+  document.getElementById('toasts').appendChild(el);
+  setTimeout(() => el.remove(), kind === 'error' ? 7000 : 3500);
+}
+
+/** Toasts sit behind an open dialog, so a dialog shows the result itself using the return value. */
+async function copyText(text) {
+  const dialog = document.querySelector('dialog[open]');
+  let copied = true;
+  try {
+    await navigator.clipboard.writeText(text);
+  } catch {
+    // The clipboard API needs a trusted connection, which a self-signed certificate may not give.
+    const area = document.createElement('textarea');
+    area.value = text;
+    (dialog || document.body).appendChild(area);
+    area.select();
+    copied = document.execCommand('copy');
+    area.remove();
+  }
+  if (!dialog) toast(copied ? 'Copied.' : "Couldn't copy automatically. Select the text and copy it.", copied ? 'info' : 'error');
+  return copied;
+}
+
+function dialogField(field) {
+  const name = esc(field.name);
+  const control = field.type === 'select'
+    ? `<select name="${name}" class="input-field">${field.options.map(([value, label]) =>
+        `<option value="${esc(value)}" ${value === field.value ? 'selected' : ''}>${esc(label)}</option>`).join('')}</select>`
+    : `<input name="${name}" class="input-field" type="${esc(field.type || 'text')}" placeholder="${esc(field.placeholder || '')}"
+        autocomplete="${esc(field.autocomplete || 'on')}" ${field.required ? 'required' : ''} />`;
+  return `<label class="field"><span>${esc(field.label)}</span>${control}</label>`;
+}
+
+/** Resolves true once confirmed, or false if cancelled. A failing onConfirm keeps it open and shows the error. */
+function openDialog({ title, text, fields = [], confirmLabel = 'Confirm', danger = false, onConfirm }) {
+  const dialog = document.getElementById('uiDialog');
+  dialog.innerHTML = `<form method="dialog" class="dialog-form">
+      <h3>${esc(title)}</h3>
+      ${text ? `<p class="modal-sub">${esc(text)}</p>` : ''}
+      ${fields.map(dialogField).join('')}
+      <div class="error-msg" role="alert" style="display:none"></div>
+      <div class="modal-actions">
+        <button class="btn-secondary" type="button" data-cancel>Cancel</button>
+        <button class="${danger ? 'btn-danger' : 'btn-primary'}" type="submit">${esc(confirmLabel)}</button>
+      </div>
+    </form>`;
+  const form = dialog.querySelector('form');
+  return new Promise(resolve => {
+    const finish = result => {
+      dialog.close();
+      resolve(result);
+    };
+    dialog.querySelector('[data-cancel]').onclick = () => finish(false);
+    dialog.oncancel = e => { e.preventDefault(); finish(false); };
+    form.onsubmit = async e => {
+      e.preventDefault();
+      const error = form.querySelector('.error-msg');
+      const submit = form.querySelector('[type=submit]');
+      error.style.display = 'none';
+      submit.disabled = true;
+      try {
+        if (onConfirm) await onConfirm(Object.fromEntries(new FormData(form)));
+        finish(true);
+      } catch (err) {
+        error.textContent = err.message;
+        error.style.display = 'block';
+        submit.disabled = false;
+      }
+    };
+    dialog.showModal();
+  });
+}
+
+function confirmDialog(title, text, confirmLabel, danger = false) {
+  return openDialog({ title, text, confirmLabel, danger });
+}
+
+/** Shows a one-time secret. There's no way out except a deliberate Done. */
+function secretDialog(title, text, secret, details = []) {
+  const dialog = document.getElementById('uiDialog');
+  dialog.innerHTML = `<div class="dialog-form">
+      <h3>${esc(title)}</h3>
+      <p class="modal-sub">${esc(text)}</p>
+      ${details.map(([k, v]) => `<div class="secret-detail"><span>${esc(k)}</span><code>${esc(v)}</code></div>`).join('')}
+      <div class="secret-box"><code id="secretValue">${esc(secret)}</code><button class="btn-secondary" type="button" data-copy>Copy</button></div>
+      <div class="modal-actions"><button class="btn-primary" type="button" data-done>Done</button></div>
+    </div>`;
+  const copyButton = dialog.querySelector('[data-copy]');
+  copyButton.onclick = async () => {
+    copyButton.textContent = await copyText(secret) ? 'Copied' : 'Select and copy it';
+  };
+  return new Promise(resolve => {
+    dialog.oncancel = e => e.preventDefault();
+    dialog.querySelector('[data-done]').onclick = () => {
+      dialog.close();
+      dialog.innerHTML = '';
+      resolve();
+    };
+    dialog.showModal();
+  });
 }
 
 function fmt(n) {

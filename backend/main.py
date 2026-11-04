@@ -58,7 +58,16 @@ app = FastAPI(
 
 # ── Middleware ────────────────────────────────────────────────────────────────
 
-app.add_middleware(GZipMiddleware, minimum_size=1000)
+class GZipExceptStreams(GZipMiddleware):
+    # Compressing a stream would hold back its tokens until the answer is finished.
+    async def __call__(self, scope, receive, send):
+        if scope["type"] == "http" and scope["path"].startswith("/v1/"):
+            await self.app(scope, receive, send)
+            return
+        await super().__call__(scope, receive, send)
+
+
+app.add_middleware(GZipExceptStreams, minimum_size=1000)
 app.add_middleware(
     CORSMiddleware,
     allow_origins=settings.CORS_ORIGINS,

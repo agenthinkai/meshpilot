@@ -15,7 +15,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from core import audit
 from core.database import FitRun, ModelRecord, ModelStatus, User, UserRole, get_db
 from core.fit import score_case
-from core.security import get_current_user_jwt
+from core.security import get_current_user_jwt, require_admin
 
 router = APIRouter()
 
@@ -86,7 +86,7 @@ async def sample_suite(user: User = Depends(get_current_user_jwt)):
 async def create_run(
     suite: FitSuite,
     db:    AsyncSession = Depends(get_db),
-    user:  User         = Depends(get_current_user_jwt),
+    user:  User         = Depends(require_admin),
 ):
     query = select(ModelRecord).where(
         ModelRecord.status == ModelStatus.READY,

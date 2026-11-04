@@ -3,47 +3,65 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>MeshPilot — CPU-Only AI Inference Platform</title>
-  <link rel="preconnect" href="https://fonts.googleapis.com" />
-  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet" />
+  <title>MeshPilot</title>
   <link rel="stylesheet" href="/static/css/dashboard.css" />
 </head>
-<body>
+<body class="no-chrome">
+  <svg width="0" height="0" style="position:absolute" aria-hidden="true">
+    <defs>
+      <symbol id="i-logo" viewBox="0 0 24 24"><path d="M12 2.5 20.5 7v10L12 21.5 3.5 17V7z" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round"/><path d="M12 12 3.8 7.2M12 12l8.2-4.8M12 12v9.2" fill="none" stroke="currentColor" stroke-width="1.6"/><circle cx="12" cy="12" r="2.2" fill="currentColor"/></symbol>
+      <symbol id="i-chat" viewBox="0 0 24 24"><path d="M20 14.5a2.5 2.5 0 0 1-2.5 2.5H9l-5 4V6.5A2.5 2.5 0 0 1 6.5 4h11A2.5 2.5 0 0 1 20 6.5z" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round"/></symbol>
+      <symbol id="i-overview" viewBox="0 0 24 24"><path d="M4 20V10M10 20V4M16 20v-7M21 20H3" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/></symbol>
+      <symbol id="i-play" viewBox="0 0 24 24"><path d="M7 4.5v15l12-7.5z" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round"/></symbol>
+      <symbol id="i-model" viewBox="0 0 24 24"><path d="M12 3 21 8l-9 5-9-5zM3 12.5l9 5 9-5M3 17l9 5 9-5" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round"/></symbol>
+      <symbol id="i-target" viewBox="0 0 24 24"><circle cx="12" cy="12" r="8.5" fill="none" stroke="currentColor" stroke-width="1.6"/><circle cx="12" cy="12" r="3.5" fill="none" stroke="currentColor" stroke-width="1.6"/></symbol>
+      <symbol id="i-shield" viewBox="0 0 24 24"><path d="M12 3 4.5 6v5.5c0 4.6 3.1 8 7.5 9.5 4.4-1.5 7.5-4.9 7.5-9.5V6z" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round"/><path d="m9 12 2.2 2.2L15.2 10" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></symbol>
+      <symbol id="i-people" viewBox="0 0 24 24"><circle cx="9" cy="8" r="3.5" fill="none" stroke="currentColor" stroke-width="1.6"/><path d="M2.5 20c.6-3.6 3.2-5.5 6.5-5.5s5.9 1.9 6.5 5.5M16 4.8a3.5 3.5 0 0 1 0 6.4M18 14.9c1.9.8 3.1 2.5 3.5 5.1" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/></symbol>
+      <symbol id="i-key" viewBox="0 0 24 24"><circle cx="8" cy="15.5" r="4.5" fill="none" stroke="currentColor" stroke-width="1.6"/><path d="M11.3 12.2 20 3.5M16 7.5l3 3" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/></symbol>
+      <symbol id="i-book" viewBox="0 0 24 24"><path d="M4 5.5A2.5 2.5 0 0 1 6.5 3H20v15H6.5A2.5 2.5 0 0 0 4 20.5zM4 20.5A2.5 2.5 0 0 0 6.5 21H20v-3" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round"/></symbol>
+      <symbol id="i-logout" viewBox="0 0 24 24"><path d="M9 4H6a2 2 0 0 0-2 2v12a2 2 0 0 0 2 2h3M15 16.5 19.5 12 15 7.5M19.5 12H10" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></symbol>
+      <symbol id="i-plus" viewBox="0 0 24 24"><path d="M12 5v14M5 12h14" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></symbol>
+      <symbol id="i-send" viewBox="0 0 24 24"><path d="M12 19V5M6 11l6-6 6 6" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></symbol>
+      <symbol id="i-stop" viewBox="0 0 24 24"><rect x="7" y="7" width="10" height="10" rx="1.5" fill="currentColor"/></symbol>
+      <symbol id="i-copy" viewBox="0 0 24 24"><rect x="9" y="9" width="11" height="11" rx="2" fill="none" stroke="currentColor" stroke-width="1.6"/><path d="M5 15H4.5A1.5 1.5 0 0 1 3 13.5v-9A1.5 1.5 0 0 1 4.5 3h9A1.5 1.5 0 0 1 15 4.5V5" fill="none" stroke="currentColor" stroke-width="1.6"/></symbol>
+      <symbol id="i-trash" viewBox="0 0 24 24"><path d="M4 7h16M9.5 7V4.5h5V7M6.5 7l1 13h9l1-13" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></symbol>
+      <symbol id="i-menu" viewBox="0 0 24 24"><path d="M4 7h16M4 12h16M4 17h10" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/></symbol>
+    </defs>
+  </svg>
+
   <!-- Sidebar -->
-  <nav class="sidebar">
+  <nav class="sidebar" aria-label="Main">
     <div class="sidebar-logo">
-      <span class="logo-icon">⚡</span>
+      <svg class="logo-mark"><use href="#i-logo"/></svg>
       <span class="logo-text">MeshPilot</span>
-      <span class="logo-badge">CPU</span>
     </div>
-    <ul class="nav-links">
-      <li><a href="#" class="nav-link active" data-page="dashboard">
-        <span class="nav-icon">📊</span> Dashboard
-      </a></li>
-      <li><a href="#" class="nav-link" data-page="demo">
-        <span class="nav-icon">🚀</span> Live Demo
-      </a></li>
-      <li><a href="#" class="nav-link" data-page="models">
-        <span class="nav-icon">🧠</span> Models
-      </a></li>
-      <li><a href="#" class="nav-link" data-page="fit">
-        <span class="nav-icon">🎯</span> Fit Report
-      </a></li>
-      <li><a href="#" class="nav-link" data-page="governance">
-        <span class="nav-icon">🛡️</span> Privacy &amp; Audit
-      </a></li>
-      <li><a href="#" class="nav-link" data-page="apikeys">
-        <span class="nav-icon">🔑</span> API Keys
-      </a></li>
-      <li><a href="#" class="nav-link" data-page="docs">
-        <span class="nav-icon">📖</span> API Docs
-      </a></li>
-    </ul>
+    <div class="nav-scroll">
+      <ul class="nav-links">
+        <li><a href="#chat" class="nav-link" data-page="chat"><svg class="nav-icon"><use href="#i-chat"/></svg><span class="nav-label">Chat</span></a></li>
+      </ul>
+      <div class="nav-group admin-only">Administration</div>
+      <ul class="nav-links admin-only">
+        <li><a href="#dashboard" class="nav-link" data-page="dashboard"><svg class="nav-icon"><use href="#i-overview"/></svg><span class="nav-label">Overview</span></a></li>
+        <li><a href="#people" class="nav-link" data-page="people"><svg class="nav-icon"><use href="#i-people"/></svg><span class="nav-label">People</span></a></li>
+        <li><a href="#models" class="nav-link" data-page="models"><svg class="nav-icon"><use href="#i-model"/></svg><span class="nav-label">Models</span></a></li>
+        <li><a href="#governance" class="nav-link" data-page="governance"><svg class="nav-icon"><use href="#i-shield"/></svg><span class="nav-label">Privacy &amp; audit</span></a></li>
+        <li><a href="#fit" class="nav-link" data-page="fit"><svg class="nav-icon"><use href="#i-target"/></svg><span class="nav-label">Fit report</span></a></li>
+        <li><a href="#demo" class="nav-link" data-page="demo"><svg class="nav-icon"><use href="#i-play"/></svg><span class="nav-label">Live demo</span></a></li>
+      </ul>
+      <div class="nav-group">Developers</div>
+      <ul class="nav-links">
+        <li><a href="#apikeys" class="nav-link" data-page="apikeys"><svg class="nav-icon"><use href="#i-key"/></svg><span class="nav-label">API keys</span></a></li>
+        <li><a href="#docs" class="nav-link" data-page="docs"><svg class="nav-icon"><use href="#i-book"/></svg><span class="nav-label">API reference</span></a></li>
+      </ul>
+    </div>
     <div class="sidebar-footer">
-      <div class="cpu-badge" id="cpuBadge">Detecting CPU...</div>
-      <div class="user-info" id="userInfo">
-        <span id="userName">Not logged in</span>
-        <button class="btn-sm" id="logoutBtn" style="display:none">Logout</button>
+      <div class="user-info">
+        <span class="user-avatar" id="userAvatar" aria-hidden="true"></span>
+        <span class="user-text">
+          <span class="user-name" id="userName"></span>
+          <button class="link-btn" type="button" onclick="showPasswordPage(false)">Change password</button>
+        </span>
+        <button class="icon-btn" id="logoutBtn" type="button" title="Sign out" aria-label="Sign out"><svg><use href="#i-logout"/></svg></button>
       </div>
     </div>
   </nav>
@@ -51,112 +69,151 @@
   <!-- Main content -->
   <main class="main-content">
 
-    <!-- ── Auth page ──────────────────────────────────────────────────────── -->
-    <div id="page-auth" class="page">
-      <div class="auth-container">
-        <div class="auth-card">
-          <h1>⚡ MeshPilot</h1>
-          <p class="auth-subtitle">CPU-Only AI Inference Platform</p>
-          <div id="tab-login" class="tab-content">
-            <input type="email" id="loginEmail" placeholder="Email" class="input-field" />
-            <input type="password" id="loginPassword" placeholder="Password" class="input-field" />
-            <button class="btn-primary full-width" onclick="login()">Login</button>
+    <!-- ── Sign in ───────────────────────────────────────────────────────── -->
+    <div id="page-auth" class="page page-full">
+      <div class="auth-layout">
+        <section class="auth-brand">
+          <div class="auth-logo"><svg class="logo-mark"><use href="#i-logo"/></svg> MeshPilot</div>
+          <div class="auth-statement">
+            <h1>Private AI, on servers you already own.</h1>
+            <p>Runs inside your company's network, with a tamper-evident record of every request.</p>
           </div>
-          <div id="authError" class="error-msg" style="display:none"></div>
-        </div>
+        </section>
+        <section class="auth-form-side">
+          <form class="auth-card" onsubmit="event.preventDefault(); login()">
+            <h2>Sign in</h2>
+            <label class="field"><span>Work email</span><input type="email" id="loginEmail" class="input-field" autocomplete="username" required autofocus /></label>
+            <label class="field"><span>Password</span><input type="password" id="loginPassword" class="input-field" autocomplete="current-password" required /></label>
+            <div id="authError" class="error-msg" role="alert" style="display:none"></div>
+            <button class="btn-primary full-width" type="submit">Sign in</button>
+            <p class="auth-help">No account yet? Ask your MeshPilot administrator.</p>
+          </form>
+        </section>
       </div>
     </div>
 
-    <!-- ── Dashboard page ────────────────────────────────────────────────── -->
+    <!-- ── Set or change password ────────────────────────────────────────── -->
+    <div id="page-password" class="page page-full">
+      <div class="password-layout">
+        <form class="auth-card" onsubmit="event.preventDefault(); submitPassword()">
+          <div class="auth-logo dark"><svg class="logo-mark"><use href="#i-logo"/></svg> MeshPilot</div>
+          <h2 id="passwordTitle">Choose your password</h2>
+          <p class="auth-help" id="passwordIntro"></p>
+          <label class="field"><span id="passwordCurrentLabel">Current password</span><input type="password" id="passwordCurrent" class="input-field" autocomplete="current-password" required /></label>
+          <label class="field"><span>New password</span><input type="password" id="passwordNew" class="input-field" autocomplete="new-password" minlength="12" required /><small>At least 12 characters. A short phrase works well.</small></label>
+          <label class="field"><span>Confirm new password</span><input type="password" id="passwordConfirm" class="input-field" autocomplete="new-password" required /></label>
+          <div id="passwordError" class="error-msg" role="alert" style="display:none"></div>
+          <button class="btn-primary full-width" type="submit">Save password</button>
+          <button class="btn-secondary full-width" type="button" id="passwordCancel" onclick="navigateTo(defaultPage())">Cancel</button>
+          <button class="link-btn subtle" type="button" id="passwordSignOut" onclick="logout()">Sign out</button>
+        </form>
+      </div>
+    </div>
+
+    <!-- ── Chat ──────────────────────────────────────────────────────────── -->
+    <div id="page-chat" class="page page-full" style="display:none">
+      <div class="chat-shell" id="chatShell">
+        <aside class="chat-list" aria-label="Your chats">
+          <button class="btn-new-chat" type="button" onclick="newChat()"><svg><use href="#i-plus"/></svg> New chat</button>
+          <div class="chat-items" id="chatItems"></div>
+          <div class="chat-list-foot">
+            <span>Chats are saved in this browser only, never on the server.</span>
+            <button class="link-btn subtle" type="button" id="chatClearAll" onclick="deleteAllChats()">Delete all</button>
+          </div>
+        </aside>
+        <div class="chat-backdrop" onclick="toggleChatList(false)"></div>
+        <section class="chat-main">
+          <header class="chat-top">
+            <button class="icon-btn chat-list-toggle" type="button" onclick="toggleChatList()" aria-label="Show chats"><svg><use href="#i-menu"/></svg></button>
+            <label class="model-picker"><span class="sr-only">Model</span><select id="chatModel" onchange="onChatModelChange()"></select></label>
+            <span class="seal" title="This chat only uses models running on your company's server"><i></i> Stays on your server</span>
+          </header>
+          <div class="chat-scroll" id="chatScroll">
+            <div class="chat-thread" id="chatThread" aria-live="polite"></div>
+          </div>
+          <div class="composer-wrap">
+            <form class="composer" id="chatComposer" onsubmit="event.preventDefault(); sendChatMessage()">
+              <textarea id="chatInput" rows="1" placeholder="Ask anything" aria-label="Message"></textarea>
+              <button class="composer-btn" id="chatSendBtn" type="submit" aria-label="Send"><svg><use href="#i-send"/></svg></button>
+            </form>
+            <p class="composer-note">Answers can be wrong, so check anything important.</p>
+          </div>
+        </section>
+      </div>
+    </div>
+
+    <!-- ── Overview ──────────────────────────────────────────────────────── -->
     <div id="page-dashboard" class="page" style="display:none">
       <div class="page-header">
-        <h2>Dashboard</h2>
-        <span class="header-sub">Real-time inference metrics</span>
+        <div><h2>Overview</h2><p class="header-sub">Your requests on this server. <span id="cpuBadge"></span></p></div>
       </div>
 
       <div class="stats-grid">
-        <div class="stat-card">
-          <div class="stat-label">Total Requests</div>
-          <div class="stat-value" id="statTotal">—</div>
-          <div class="stat-sub">all time</div>
-        </div>
-        <div class="stat-card">
-          <div class="stat-label">Requests (24h)</div>
-          <div class="stat-value" id="stat24h">—</div>
-          <div class="stat-sub">last 24 hours</div>
-        </div>
-        <div class="stat-card">
-          <div class="stat-label">Avg Latency</div>
-          <div class="stat-value" id="statLatency">—</div>
-          <div class="stat-sub">milliseconds</div>
-        </div>
-        <div class="stat-card">
-          <div class="stat-label">Throughput</div>
-          <div class="stat-value" id="statTPS">—</div>
-          <div class="stat-sub">tokens/second</div>
-        </div>
-        <div class="stat-card">
-          <div class="stat-label">Total Tokens</div>
-          <div class="stat-value" id="statTokens">—</div>
-          <div class="stat-sub">generated</div>
-        </div>
-        <div class="stat-card">
-          <div class="stat-label">Models Loaded</div>
-          <div class="stat-value" id="statModels">—</div>
-          <div class="stat-sub">available</div>
-        </div>
+        <div class="stat-card"><div class="stat-label">Total requests</div><div class="stat-value" id="statTotal">—</div><div class="stat-sub">all time</div></div>
+        <div class="stat-card"><div class="stat-label">Last 24 hours</div><div class="stat-value" id="stat24h">—</div><div class="stat-sub">requests</div></div>
+        <div class="stat-card"><div class="stat-label">Average response</div><div class="stat-value" id="statLatency">—</div><div class="stat-sub">per request</div></div>
+        <div class="stat-card"><div class="stat-label">Throughput</div><div class="stat-value" id="statTPS">—</div><div class="stat-sub">tokens per second</div></div>
+        <div class="stat-card"><div class="stat-label">Tokens generated</div><div class="stat-value" id="statTokens">—</div><div class="stat-sub">all time</div></div>
+        <div class="stat-card"><div class="stat-label">Models</div><div class="stat-value" id="statModels">—</div><div class="stat-sub">available</div></div>
       </div>
 
       <div class="section-card">
-        <h3>Savings vs plain PyTorch</h3>
+        <h3>Savings against plain PyTorch</h3>
         <div id="savingsDash"></div>
       </div>
 
       <div class="section-card">
-        <h3>CPU Profile</h3>
-        <div id="cpuProfile" class="cpu-profile-grid">Loading...</div>
+        <h3>Recent requests</h3>
+        <div class="table-scroll"><table class="data-table" id="historyTable">
+          <thead><tr><th>Model</th><th>Status</th><th>Response time</th><th>Speed</th><th>Backend</th><th>Time</th></tr></thead>
+          <tbody id="historyBody"><tr><td colspan="6" class="empty-cell">Loading…</td></tr></tbody>
+        </table></div>
       </div>
 
-      <div class="section-card">
-        <h3>Recent Inferences</h3>
-        <table class="data-table" id="historyTable">
-          <thead>
-            <tr>
-              <th>ID</th><th>Model</th><th>Status</th>
-              <th>Latency</th><th>Tokens/s</th><th>Backend</th><th>Time</th>
-            </tr>
-          </thead>
-          <tbody id="historyBody"><tr><td colspan="7">Loading...</td></tr></tbody>
-        </table>
-      </div>
+      <details class="section-card plain-details">
+        <summary>Server hardware</summary>
+        <div id="cpuProfile" class="cpu-profile-grid">Loading…</div>
+      </details>
     </div>
 
-    <!-- ── Live Demo page ────────────────────────────────────────────────── -->
+    <!-- ── People ────────────────────────────────────────────────────────── -->
+    <div id="page-people" class="page" style="display:none">
+      <div class="page-header">
+        <div><h2>People</h2><p class="header-sub">Who can sign in to MeshPilot</p></div>
+        <button class="btn-primary" type="button" onclick="addPerson()"><svg class="btn-icon"><use href="#i-plus"/></svg> Add person</button>
+      </div>
+      <div class="section-card flush">
+        <div class="table-scroll"><table class="data-table people-table">
+          <thead><tr><th>Person</th><th>Role</th><th>Status</th><th>Last sign-in</th><th></th></tr></thead>
+          <tbody id="peopleBody"><tr><td colspan="5" class="empty-cell">Loading…</td></tr></tbody>
+        </table></div>
+      </div>
+      <p class="api-note">Deactivating someone signs them out and stops their API keys straight away. Their audit history is kept.</p>
+    </div>
+
+    <!-- ── Live demo ─────────────────────────────────────────────────────── -->
     <div id="page-demo" class="page" style="display:none">
       <div class="page-header">
-        <h2>🚀 Live Demo</h2>
-        <span class="header-sub">CPU-only · same prompt, same hardware, real numbers</span>
+        <div><h2>Live demo</h2><p class="header-sub">Same prompt, same hardware, real numbers</p></div>
       </div>
 
       <div class="demo-container">
         <div class="demo-model-select">
-          <label>Model</label>
-          <select id="demoModel" class="input-field">
-            <option value="">Loading models...</option>
-          </select>
+          <label for="demoModel">Model</label>
+          <select id="demoModel" class="input-field"><option value="">Loading models…</option></select>
         </div>
 
         <div class="compare-toggle">
           <label class="compare-toggle-label">
             <input type="checkbox" id="compareMode" onchange="onCompareToggle()" />
-            Compare: With vs Without MeshPilot (same model, both live)
+            Compare with and without MeshPilot
           </label>
           <div class="compare-toggle-note" id="compareNote"></div>
         </div>
 
         <div class="demo-params">
           <div class="param-group">
-            <label>Max Tokens <span id="maxTokensVal">150</span></label>
+            <label>Max tokens <span id="maxTokensVal">150</span></label>
             <input type="range" id="maxTokens" min="64" max="2048" value="150"
               oninput="document.getElementById('maxTokensVal').textContent=this.value" />
           </div>
@@ -168,14 +225,11 @@
         </div>
 
         <div class="prompt-area">
-          <label>Prompt</label>
-          <textarea id="demoPrompt" class="input-field" rows="5"
-            placeholder="Describe your startup idea in plain words...">Explain the key risks of a SaaS business targeting enterprise clients in three concise bullet points.</textarea>
+          <label for="demoPrompt">Prompt</label>
+          <textarea id="demoPrompt" class="input-field" rows="4">Explain the key risks of a SaaS business targeting enterprise clients in three concise bullet points.</textarea>
         </div>
 
-        <button class="btn-primary" id="runBtn" onclick="runDemo()">
-          ▶ Run Inference
-        </button>
+        <button class="btn-primary" id="runBtn" type="button" onclick="runDemo()">Run</button>
 
         <!-- Single-response mode -->
         <div class="response-area" id="responseArea" style="display:none">
@@ -191,14 +245,14 @@
           <div class="speedup-banner" id="speedupBanner" style="display:none"></div>
 
           <div class="stat-cards" id="statCards" style="display:none">
-            <div class="stat-card mesh">
-              <div class="stat-card-tag">🚀 With MeshPilot</div>
+            <div class="compare-card mesh">
+              <div class="stat-card-tag">With MeshPilot</div>
               <div class="stat-card-big" id="statWithLatency">—</div>
               <div class="stat-card-sub" id="statWithTps">—</div>
               <div class="stat-card-sub" id="statWithMem"></div>
             </div>
-            <div class="stat-card plain">
-              <div class="stat-card-tag">🐢 Without MeshPilot</div>
+            <div class="compare-card plain">
+              <div class="stat-card-tag">Plain PyTorch</div>
               <div class="stat-card-big" id="statWithoutLatency">—</div>
               <div class="stat-card-sub" id="statWithoutTps">—</div>
               <div class="stat-card-sub" id="statWithoutMem"></div>
@@ -207,40 +261,40 @@
 
           <div class="chart-block" id="chartBlock" style="display:none">
             <div class="chart-row">
-              <div class="chart-label">Response Time <span class="chart-hint">(shorter = faster)</span></div>
+              <div class="chart-label">Response time <span class="chart-hint">shorter is faster</span></div>
               <div class="chart-bar-item">
                 <span class="chart-bar-tag mesh">MeshPilot</span>
                 <div class="chart-bar-track"><div class="chart-bar-fill mesh" id="barLatencyWith"></div></div>
                 <span class="chart-bar-value" id="barLatencyWithVal"></span>
               </div>
               <div class="chart-bar-item">
-                <span class="chart-bar-tag plain">Without</span>
+                <span class="chart-bar-tag plain">PyTorch</span>
                 <div class="chart-bar-track"><div class="chart-bar-fill plain" id="barLatencyWithout"></div></div>
                 <span class="chart-bar-value" id="barLatencyWithoutVal"></span>
               </div>
             </div>
             <div class="chart-row">
-              <div class="chart-label">Throughput <span class="chart-hint">(longer = faster)</span></div>
+              <div class="chart-label">Throughput <span class="chart-hint">longer is faster</span></div>
               <div class="chart-bar-item">
                 <span class="chart-bar-tag mesh">MeshPilot</span>
                 <div class="chart-bar-track"><div class="chart-bar-fill mesh" id="barTpsWith"></div></div>
                 <span class="chart-bar-value" id="barTpsWithVal"></span>
               </div>
               <div class="chart-bar-item">
-                <span class="chart-bar-tag plain">Without</span>
+                <span class="chart-bar-tag plain">PyTorch</span>
                 <div class="chart-bar-track"><div class="chart-bar-fill plain" id="barTpsWithout"></div></div>
                 <span class="chart-bar-value" id="barTpsWithoutVal"></span>
               </div>
             </div>
             <div class="chart-row" id="memoryChartRow" style="display:none">
-              <div class="chart-label">Memory Used <span class="chart-hint">(shorter = lighter, live from Docker)</span></div>
+              <div class="chart-label">Memory used <span class="chart-hint">shorter is lighter, live from Docker</span></div>
               <div class="chart-bar-item">
                 <span class="chart-bar-tag mesh">MeshPilot</span>
                 <div class="chart-bar-track"><div class="chart-bar-fill mesh" id="barMemWith"></div></div>
                 <span class="chart-bar-value" id="barMemWithVal"></span>
               </div>
               <div class="chart-bar-item">
-                <span class="chart-bar-tag plain">Without</span>
+                <span class="chart-bar-tag plain">PyTorch</span>
                 <div class="chart-bar-track"><div class="chart-bar-fill plain" id="barMemWithout"></div></div>
                 <span class="chart-bar-value" id="barMemWithoutVal"></span>
               </div>
@@ -248,76 +302,70 @@
           </div>
 
           <div class="savings-block">
-            <div class="chart-label">Running totals <span class="chart-hint">(all comparison runs so far)</span></div>
+            <div class="chart-label">Running totals <span class="chart-hint">all comparison runs so far</span></div>
             <div id="savingsCompare"></div>
           </div>
 
           <div class="compare-grid">
             <div class="response-area compare-panel" id="withPanel">
-              <div class="response-header">
-                <span>🚀 With MeshPilot — response</span>
-              </div>
+              <div class="response-header"><span>With MeshPilot</span></div>
               <pre class="response-text response-text-clipped" id="withText"></pre>
-              <button class="expand-toggle" id="withExpandBtn" onclick="toggleExpand('with')" style="display:none">Show full response ▾</button>
+              <button class="expand-toggle" id="withExpandBtn" type="button" onclick="toggleExpand('with')" style="display:none">Show full response</button>
             </div>
             <div class="response-area compare-panel" id="withoutPanel">
-              <div class="response-header">
-                <span>🐢 Without MeshPilot — response</span>
-              </div>
+              <div class="response-header"><span>Plain PyTorch</span></div>
               <pre class="response-text response-text-clipped" id="withoutText"></pre>
-              <button class="expand-toggle" id="withoutExpandBtn" onclick="toggleExpand('without')" style="display:none">Show full response ▾</button>
+              <button class="expand-toggle" id="withoutExpandBtn" type="button" onclick="toggleExpand('without')" style="display:none">Show full response</button>
             </div>
           </div>
         </div>
       </div>
     </div>
 
-    <!-- ── Models page ───────────────────────────────────────────────────── -->
+    <!-- ── Models ────────────────────────────────────────────────────────── -->
     <div id="page-models" class="page" style="display:none">
       <div class="page-header">
-        <h2>🧠 Model Registry</h2>
-        <button class="btn-primary" onclick="showUploadModal()">+ Upload Model</button>
+        <div><h2>Models</h2><p class="header-sub">What this server can run</p></div>
+        <button class="btn-primary" type="button" onclick="showUploadModal()"><svg class="btn-icon"><use href="#i-plus"/></svg> Upload model</button>
       </div>
 
-      <div id="modelsList" class="models-grid">Loading...</div>
+      <div id="modelsList" class="models-grid">Loading…</div>
 
-      <!-- Upload modal -->
       <div id="uploadModal" class="modal" style="display:none">
         <div class="modal-content">
-          <h3>Upload Model</h3>
-          <p class="modal-sub">Supported: GGUF, ONNX, Safetensors</p>
-          <input type="text" id="uploadName" placeholder="Model name" class="input-field" />
-          <input type="text" id="uploadDesc" placeholder="Description (optional)" class="input-field" />
+          <h3>Upload model</h3>
+          <p class="modal-sub">GGUF, ONNX or Safetensors</p>
+          <label class="field"><span>Name</span><input type="text" id="uploadName" class="input-field" /></label>
+          <label class="field"><span>Description (optional)</span><input type="text" id="uploadDesc" class="input-field" /></label>
           <div class="file-drop" id="fileDrop" onclick="document.getElementById('fileInput').click()">
             <input type="file" id="fileInput" accept=".gguf,.onnx,.safetensors"
               onchange="handleFileSelect(this)" style="display:none" />
-            <span id="fileDropText">Click or drag to upload model file</span>
+            <span id="fileDropText">Choose a model file</span>
           </div>
           <div class="upload-progress" id="uploadProgress" style="display:none">
             <div class="progress-bar"><div class="progress-fill" id="progressFill"></div></div>
-            <span id="progressText">Uploading...</span>
+            <span id="progressText">Uploading…</span>
           </div>
           <div class="modal-actions">
-            <button class="btn-secondary" onclick="hideUploadModal()">Cancel</button>
-            <button class="btn-primary" onclick="uploadModel()">Upload & Quantize</button>
+            <button class="btn-secondary" type="button" onclick="hideUploadModal()">Cancel</button>
+            <button class="btn-primary" type="button" onclick="uploadModel()">Upload and quantize</button>
           </div>
         </div>
       </div>
     </div>
 
-    <!-- ── Fit Report page ───────────────────────────────────────────────── -->
+    <!-- ── Fit report ────────────────────────────────────────────────────── -->
     <div id="page-fit" class="page" style="display:none">
       <div class="page-header">
-        <h2>🎯 Fit Report</h2>
-        <span class="header-sub">Which model works on your documents, on this hardware, and what it would cost</span>
+        <div><h2>Fit report</h2><p class="header-sub">Which model works on your documents, on this hardware, and what it would cost</p></div>
       </div>
       <div class="section-card">
         <h3>Test suite</h3>
         <p class="api-note">Each case is a prompt from the customer's own work and what a right answer must contain. Everything runs on this server. A sample with fictional data is loaded below.</p>
         <textarea id="fitSuite" class="input-field code-input" rows="14" spellcheck="false"></textarea>
         <div class="form-actions">
-          <button class="btn-primary" onclick="startFitRun()">▶ Run fit report</button>
-          <button class="btn-secondary" onclick="loadFitSample()">Load sample</button>
+          <button class="btn-primary" type="button" onclick="startFitRun()">Run fit report</button>
+          <button class="btn-secondary" type="button" onclick="loadFitSample()">Load sample</button>
           <label class="btn-secondary">Open file<input type="file" accept=".json" onchange="loadFitFile(this)" hidden /></label>
           <span id="fitMessage" class="form-message"></span>
         </div>
@@ -326,25 +374,21 @@
         <h3>Reports</h3>
         <div class="table-scroll"><table class="data-table">
           <thead><tr><th>Name</th><th>Status</th><th>Started</th><th></th></tr></thead>
-          <tbody id="fitRunsBody"><tr><td colspan="4">Loading...</td></tr></tbody>
+          <tbody id="fitRunsBody"><tr><td colspan="4" class="empty-cell">Loading…</td></tr></tbody>
         </table></div>
       </div>
       <div id="fitReport"></div>
     </div>
 
-    <!-- ── Privacy & Audit page ──────────────────────────────────────────── -->
+    <!-- ── Privacy & audit ───────────────────────────────────────────────── -->
     <div id="page-governance" class="page" style="display:none">
       <div class="page-header">
-        <h2>🛡️ Privacy &amp; Audit</h2>
-        <span class="header-sub">Where each request ran, and the record to prove it</span>
-      </div>
-      <div id="governanceAdminOnly" class="section-card" style="display:none">
-        <p class="api-note">Only administrators can view this page.</p>
+        <div><h2>Privacy &amp; audit</h2><p class="header-sub">Where each request ran, and the record to prove it</p></div>
       </div>
       <div id="governanceContent">
         <div id="cloudStatus" class="route-banner"></div>
 
-        <div class="stats-grid">
+        <div class="stats-grid four">
           <div class="stat-card"><div class="stat-label">Stayed on this server</div><div class="stat-value" id="auditLocal">—</div><div class="stat-sub">requests</div></div>
           <div class="stat-card"><div class="stat-label">Sent to cloud</div><div class="stat-value" id="auditCloud">—</div><div class="stat-sub">requests</div></div>
           <div class="stat-card"><div class="stat-label">Blocked</div><div class="stat-value" id="auditBlocked">—</div><div class="stat-sub">requests</div></div>
@@ -352,10 +396,26 @@
         </div>
 
         <div class="section-card">
-          <h3>Try the detector</h3>
-          <textarea id="scanText" class="input-field" rows="3" placeholder="Paste text to see what would be detected. It isn't stored.">Customer Priya, card 4111 1111 1111 1111, email priya@example.com, asked about her overdraft fee.</textarea>
-          <div class="form-actions"><button class="btn-secondary" onclick="tryScan()">Check text</button></div>
-          <div id="scanResult" class="route-banner" style="margin-top:12px"></div>
+          <div class="section-title-row">
+            <h3>Audit trail</h3>
+            <div class="form-actions">
+              <select id="auditRoute" class="input-field" onchange="loadAuditEvents()" aria-label="Filter events">
+                <option value="">All events</option>
+                <option value="local">Local</option>
+                <option value="cloud">Cloud</option>
+                <option value="blocked">Blocked</option>
+              </select>
+              <button class="btn-secondary" type="button" onclick="verifyAudit()">Verify integrity</button>
+              <button class="btn-secondary" type="button" onclick="exportAudit('csv')">CSV</button>
+              <button class="btn-secondary" type="button" onclick="exportAudit('jsonl')">JSONL</button>
+            </div>
+          </div>
+          <div id="auditVerify" class="route-banner"></div>
+          <p class="api-note">Prompts are never stored here: only a fingerprint, and counts of what was detected.</p>
+          <div class="table-scroll"><table class="data-table">
+            <thead><tr><th>#</th><th>Time</th><th>Event</th><th>Who</th><th>Route</th><th>Sensitive data</th><th>Reason</th></tr></thead>
+            <tbody id="auditBody"><tr><td colspan="7" class="empty-cell">Loading…</td></tr></tbody>
+          </table></div>
         </div>
 
         <div class="section-card">
@@ -379,63 +439,39 @@
             <textarea id="policyTerms" class="input-field" rows="4"></textarea>
           </div>
           <div class="form-actions">
-            <button class="btn-primary" onclick="savePolicy()">Save policy</button>
+            <button class="btn-primary" type="button" onclick="savePolicy()">Save policy</button>
             <span id="policyMessage" class="form-message"></span>
           </div>
         </div>
 
         <div class="section-card">
-          <div class="section-title-row">
-            <h3>Audit trail</h3>
-            <div class="form-actions">
-              <select id="auditRoute" class="input-field" onchange="loadAuditEvents()">
-                <option value="">All events</option>
-                <option value="local">Local</option>
-                <option value="cloud">Cloud</option>
-                <option value="blocked">Blocked</option>
-              </select>
-              <button class="btn-secondary" onclick="verifyAudit()">Verify integrity</button>
-              <button class="btn-secondary" onclick="exportAudit('csv')">Export CSV</button>
-              <button class="btn-secondary" onclick="exportAudit('jsonl')">Export JSONL</button>
-            </div>
-          </div>
-          <div id="auditVerify" class="route-banner"></div>
-          <p class="api-note">Prompts are never stored here: only a fingerprint, and counts of what was detected.</p>
-          <div class="table-scroll"><table class="data-table">
-            <thead><tr><th>#</th><th>Time</th><th>Event</th><th>Who</th><th>Route</th><th>Sensitive data</th><th>Reason</th></tr></thead>
-            <tbody id="auditBody"><tr><td colspan="7">Loading...</td></tr></tbody>
-          </table></div>
+          <h3>Try the detector</h3>
+          <textarea id="scanText" class="input-field" rows="3" placeholder="Paste text to see what would be detected. It isn't stored.">Customer Priya, card 4111 1111 1111 1111, email priya@example.com, asked about her overdraft fee.</textarea>
+          <div class="form-actions"><button class="btn-secondary" type="button" onclick="tryScan()">Check text</button></div>
+          <div id="scanResult" class="route-banner" style="margin-top:12px"></div>
         </div>
       </div>
     </div>
 
-    <!-- ── API Keys page ─────────────────────────────────────────────────── -->
+    <!-- ── API keys ──────────────────────────────────────────────────────── -->
     <div id="page-apikeys" class="page" style="display:none">
       <div class="page-header">
-        <h2>🔑 API Keys</h2>
-        <button class="btn-primary" onclick="createAPIKey()">+ New Key</button>
+        <div><h2>API keys</h2><p class="header-sub">For connecting your own apps to MeshPilot. Each key is shown only once.</p></div>
+        <button class="btn-primary" type="button" onclick="createAPIKey()"><svg class="btn-icon"><use href="#i-plus"/></svg> New key</button>
       </div>
-      <div class="section-card">
-        <p class="api-note">API keys are shown only once. Store them securely.</p>
-        <table class="data-table" id="apiKeysTable">
-          <thead>
-            <tr><th>Name</th><th>Prefix</th><th>Requests</th><th>Last Used</th><th>Action</th></tr>
-          </thead>
-          <tbody id="apiKeysBody"><tr><td colspan="5">Loading...</td></tr></tbody>
-        </table>
-      </div>
-      <div id="newKeyBanner" class="new-key-banner" style="display:none">
-        <strong>New API Key (copy now — shown once):</strong>
-        <code id="newKeyValue"></code>
-        <button onclick="copyKey()">Copy</button>
+      <div class="section-card flush">
+        <div class="table-scroll"><table class="data-table" id="apiKeysTable">
+          <thead><tr><th>Name</th><th>Prefix</th><th>Requests</th><th>Last used</th><th></th></tr></thead>
+          <tbody id="apiKeysBody"><tr><td colspan="5" class="empty-cell">Loading…</td></tr></tbody>
+        </table></div>
       </div>
     </div>
 
-    <!-- ── API Docs page ─────────────────────────────────────────────────── -->
+    <!-- ── API reference ─────────────────────────────────────────────────── -->
     <div id="page-docs" class="page" style="display:none">
       <div class="page-header">
-        <h2>📖 API Reference</h2>
-        <a href="/api/docs" target="_blank" class="btn-secondary">Open Swagger UI ↗</a>
+        <div><h2>API reference</h2><p class="header-sub">Point existing OpenAI code at this server</p></div>
+        <a href="/api/docs" target="_blank" rel="noopener" class="btn-secondary">Open Swagger UI</a>
       </div>
       <div class="section-card">
         <h3>Use it from existing OpenAI code</h3>
@@ -450,9 +486,9 @@ reply = client.chat.completions.create(
 )
 print(reply.choices[0].message.content)
         </pre>
-        <h3>Quick Start</h3>
+        <h3>Quick start</h3>
         <pre class="code-block">
-# 1. Get an API key from the API Keys page
+# 1. Get an API key from the API keys page
 # 2. Run synchronous inference
 
 curl -X POST https://your-meshpilot.host/api/v1/inference/sync/{model_id} \
@@ -474,7 +510,7 @@ curl -X POST https://your-meshpilot.host/api/v1/inference/sync/{model_id} \
   "backend_used": "llamacpp"
 }
         </pre>
-        <h3>Async Inference</h3>
+        <h3>Async inference</h3>
         <pre class="code-block">
 # Submit async job
 curl -X POST .../api/v1/inference/async/{model_id} \
@@ -487,24 +523,17 @@ curl -X POST .../api/v1/inference/async/{model_id} \
 # Poll for result
 curl .../api/v1/inference/tasks/xyz789 -H "X-API-Key: mp_..."
         </pre>
-        <h3>Model Upload</h3>
-        <pre class="code-block">
-# Upload a GGUF model (auto-quantized to INT4)
-curl -X POST .../api/v1/models \
-  -H "Authorization: Bearer {jwt_token}" \
-  -F "file=@./my-model.gguf" \
-  -F "name=My Custom Model" \
-  -F "description=Fine-tuned on domain data"
-
-# Check quantization status
-curl .../api/v1/models/{model_id} -H "Authorization: Bearer {jwt_token}"
-        </pre>
       </div>
     </div>
 
   </main>
 
+  <dialog id="uiDialog" class="ui-dialog"></dialog>
+  <div id="toasts" class="toasts" role="status" aria-live="polite"></div>
+
   <script src="/static/js/app.js"></script>
   <script src="/static/js/platform.js"></script>
+  <script src="/static/js/chat.js"></script>
+  <script src="/static/js/people.js"></script>
 </body>
 </html>

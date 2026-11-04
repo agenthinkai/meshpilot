@@ -34,6 +34,24 @@ def verify_password(plain: str, hashed: str) -> bool:
     return pwd_context.verify(plain, hashed)
 
 
+MIN_PASSWORD_LENGTH = 12
+MAX_PASSWORD_BYTES = 72  # bcrypt only reads this many
+TEMPORARY_PASSWORD_LENGTH = 16
+_TEMPORARY_PASSWORD_ALPHABET = "abcdefghjkmnpqrstuvwxyzABCDEFGHJKLMNPQRSTUVWXYZ23456789"  # nothing easily misread
+
+
+def password_problem(password: str) -> Optional[str]:
+    if len(password) < MIN_PASSWORD_LENGTH:
+        return f"Use at least {MIN_PASSWORD_LENGTH} characters"
+    if len(password.encode()) > MAX_PASSWORD_BYTES:
+        return f"Use at most {MAX_PASSWORD_BYTES} bytes"
+    return None
+
+
+def generate_temporary_password() -> str:
+    return "".join(secrets.choice(_TEMPORARY_PASSWORD_ALPHABET) for _ in range(TEMPORARY_PASSWORD_LENGTH))
+
+
 # ── JWT ───────────────────────────────────────────────────────────────────────
 
 def create_access_token(data: dict, expires_delta: Optional[timedelta] = None) -> str:
@@ -88,10 +106,18 @@ bearer_scheme = HTTPBearer(auto_error=False)
 api_key_header = APIKeyHeader(name="X-API-Key", auto_error=False)
 
 
-async def get_current_user_jwt(
+def _token_outlived_password(user: User, payload: dict) -> bool:
+    """A password change or reset ends every session started before it."""
+    changed = user.password_changed_at
+    return bool(changed) and payload.get("iat", 0) < int(changed.timestamp())
+
+
+async def get_user_with_any_password(
     credentials: Optional[HTTPAuthorizationCredentials] = Security(bearer_scheme),
     db: AsyncSession = Depends(get_db),
 ) -> User:
+    """Also accepts someone still on a temporary password, so only use it for
+    the endpoints they need in order to replace it."""
     if not credentials:
         raise HTTPException(status_code=401, detail="Bearer token required")
     payload = decode_token(credentials.credentials)
@@ -100,8 +126,14 @@ async def get_current_user_jwt(
         raise HTTPException(status_code=401, detail="Invalid token payload")
     result = await db.execute(select(User).where(User.id == user_id, User.is_active == True))
     user = result.scalar_one_or_none()
-    if not user:
+    if not user or _token_outlived_password(user, payload):
         raise HTTPException(status_code=401, detail="User not found or inactive")
+    return user
+
+
+async def get_current_user_jwt(user: User = Depends(get_user_with_any_password)) -> User:
+    if user.must_change_password:
+        raise HTTPException(status_code=403, detail="Set a new password first")
     return user
 
 
@@ -147,7 +179,10 @@ async def _optional_jwt_user(
     if not user_id:
         return None
     result = await db.execute(select(User).where(User.id == user_id, User.is_active == True))
-    return result.scalar_one_or_none()
+    user = result.scalar_one_or_none()
+    if not user or user.must_change_password or _token_outlived_password(user, payload):
+        return None
+    return user
 
 
 async def _optional_api_key_user(
@@ -196,7 +231,7 @@ async def get_openai_user(
     if not token:
         raise HTTPException(status_code=401, detail="Missing API key. Send it as: Authorization: Bearer mp_...")
     if not token.startswith(settings.API_KEY_PREFIX):
-        return await get_current_user_jwt(credentials, db)
+        return await get_current_user_jwt(await get_user_with_any_password(credentials, db))
 
     result = await db.execute(
         select(APIKey).where(APIKey.key_hash == hash_api_key(token), APIKey.is_active == True)

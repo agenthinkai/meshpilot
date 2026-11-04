@@ -15,18 +15,26 @@ services:
 
   # ── Reverse Proxy ───────────────────────────────────────────────────────────
   nginx:
-    image: nginx:1.25-alpine
+    build:
+      context: ./infra/nginx
+      dockerfile: Dockerfile
     container_name: meshpilot-nginx
     # Host 80/443 are already taken by the existing agenthinkmesh.com stack
     # (pitchproof-caddy-1). MeshPilot binds 8100 on the host instead; TLS and
     # the public hostname are handled by that existing Caddy — see
     # meshpilot-caddy.conf. Bind to 127.0.0.1 so 8100 is NOT reachable from the
     # public internet: the only way in is via the reverse proxy.
+    # HTTPS is for serving employees directly. It also stays on this machine
+    # until MESHPILOT_HTTPS_BIND=0.0.0.0 opens it to the network.
     ports:
       - "127.0.0.1:${MESHPILOT_PORT:-8100}:80"
+      - "${MESHPILOT_HTTPS_BIND:-127.0.0.1}:${MESHPILOT_HTTPS_PORT:-8443}:443"
+    environment:
+      - MESHPILOT_HOSTNAMES=${MESHPILOT_HOSTNAMES:-localhost}
     volumes:
       - ./infra/nginx/nginx.conf:/etc/nginx/nginx.conf:ro
-      - ./infra/nginx/certs:/etc/nginx/certs:ro
+      - ./infra/nginx/meshpilot-locations.conf:/etc/nginx/meshpilot-locations.conf:ro
+      - ./infra/nginx/certs:/etc/nginx/certs
       - nginx-logs:/var/log/nginx
     depends_on:
       - api

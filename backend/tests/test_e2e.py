@@ -548,3 +548,150 @@ def test_existing_sync_endpoint_still_works_and_is_audited(api, admin_headers, k
 
 def test_api_container_has_no_docker_socket():
     assert not os.path.exists("/var/run/docker.sock")
+
+
+# ── People ───────────────────────────────────────────────────────────────────
+
+NEW_PASSWORD = "a long enough phrase 1"
+
+
+def login(api, email, password):
+    return httpx.post(f"{api}/api/v1/auth/login", json={"email": email, "password": password}, timeout=30)
+
+
+def bearer(token):
+    return {"Authorization": f"Bearer {token}"}
+
+
+def add_person(api, admin_headers, role="user"):
+    email = f"person-{time.time_ns()}@example.com"
+    resp = httpx.post(f"{api}/api/v1/admin/users", headers=admin_headers, timeout=30,
+                      json={"email": email, "name": f"Person {time.time_ns()}", "role": role})
+    assert resp.status_code == 201, resp.text
+    return resp.json()["user"], resp.json()["temporary_password"]
+
+
+def active_member(api, admin_headers):
+    person, temporary = add_person(api, admin_headers)
+    token = login(api, person["email"], temporary).json()["access_token"]
+    resp = httpx.post(f"{api}/api/v1/auth/change-password", headers=bearer(token), timeout=30,
+                      json={"current_password": temporary, "new_password": NEW_PASSWORD})
+    assert resp.status_code == 200, resp.text
+    return person, resp.json()["access_token"]
+
+
+def test_new_person_can_only_set_a_password_until_they_have(api, admin_headers):
+    person, temporary = add_person(api, admin_headers)
+    assert len(temporary) >= 16
+
+    signed_in = login(api, person["email"].upper(), temporary)
+    assert signed_in.status_code == 200, signed_in.text
+    assert signed_in.json()["must_change_password"] is True
+    headers = bearer(signed_in.json()["access_token"])
+
+    assert httpx.get(f"{api}/api/v1/auth/me", headers=headers, timeout=30).json()["must_change_password"] is True
+    assert httpx.get(f"{api}/api/v1/models", headers=headers, timeout=30).status_code == 403
+    assert httpx.get(f"{api}/v1/models", headers=headers, timeout=30).status_code == 403
+    assert httpx.post(f"{api}/api/v1/inference/sync/{LOCAL_MODEL}", headers=headers, timeout=30,
+                      json={"prompt": "hi"}).status_code == 401
+    assert httpx.post(f"{api}/api/v1/auth/api-keys", headers=headers, json={"name": "x"}, timeout=30).status_code == 403
+
+    change = lambda current, new: httpx.post(f"{api}/api/v1/auth/change-password", headers=headers, timeout=30,
+                                             json={"current_password": current, "new_password": new})
+    assert change("wrong password here", NEW_PASSWORD).status_code == 400
+    assert change(temporary, "too short").status_code == 400
+    assert change(temporary, temporary).status_code == 400
+    changed = change(temporary, NEW_PASSWORD)
+    assert changed.status_code == 200, changed.text
+
+    # A token from the moment of the change is valid; the temporary password isn't.
+    assert httpx.get(f"{api}/api/v1/models", headers=bearer(changed.json()["access_token"]), timeout=30).status_code == 200
+    assert login(api, person["email"], temporary).status_code == 401
+    assert login(api, person["email"], NEW_PASSWORD).json()["must_change_password"] is False
+
+
+def test_temporary_password_is_not_in_the_audit_trail(api, admin_headers):
+    person, temporary = add_person(api, admin_headers)
+    latest = events(api, admin_headers, limit=5)
+    created = next(e for e in latest if e["event_type"] == "user.created")
+    assert person["email"] == created["detail"]["target_email"] and temporary not in json.dumps(latest)
+
+
+def test_duplicate_people_are_refused(api, admin_headers):
+    person, _ = add_person(api, admin_headers)
+    same_email = httpx.post(f"{api}/api/v1/admin/users", headers=admin_headers, timeout=30,
+                            json={"email": person["email"].upper(), "name": "Someone Else"})
+    same_name = httpx.post(f"{api}/api/v1/admin/users", headers=admin_headers, timeout=30,
+                           json={"email": f"other-{time.time_ns()}@example.com", "name": person["username"]})
+    assert same_email.status_code == 409 and same_name.status_code == 409
+
+
+def test_members_cannot_use_admin_features(api, admin_headers):
+    _, token = active_member(api, admin_headers)
+    headers = bearer(token)
+    assert httpx.get(f"{api}/api/v1/admin/users", headers=headers, timeout=30).status_code == 403
+    assert httpx.post(f"{api}/api/v1/admin/users", headers=headers, timeout=30,
+                      json={"email": "x@example.com", "name": "Nope"}).status_code == 403
+    assert httpx.get(f"{api}/api/v1/governance/audit/events", headers=headers, timeout=30).status_code == 403
+    sample = httpx.get(f"{api}/api/v1/fit/sample", headers=headers, timeout=30).json()
+    assert httpx.post(f"{api}/api/v1/fit/runs", headers=headers, json=sample, timeout=30).status_code == 403
+    upload = httpx.post(f"{api}/api/v1/models", headers=headers, timeout=30,
+                        data={"name": "m"}, files={"file": ("m.gguf", b"not a model")})
+    assert upload.status_code == 403
+
+
+def test_member_can_chat_with_their_session(api, admin_headers):
+    _, token = active_member(api, admin_headers)
+    with httpx.stream("POST", f"{api}/v1/chat/completions", headers=bearer(token), timeout=180, json={
+        "model": LOCAL_MODEL, "stream": True, "max_tokens": 8, "stream_options": {"include_usage": True},
+        "messages": [{"role": "user", "content": "Say hello."}],
+    }) as resp:
+        assert resp.status_code == 200
+        assert resp.headers["x-meshpilot-route"] == "local"
+        lines = [line for line in resp.iter_lines() if line.startswith("data:")]
+    assert lines[-1] == "data: [DONE]"
+    assert any('"usage"' in line for line in lines)
+
+
+def test_tokens_arrive_as_they_are_generated_for_clients_that_accept_gzip(api, key_headers):
+    times = []
+    with httpx.stream("POST", f"{api}/v1/chat/completions", timeout=180,
+                      headers={**key_headers, "Accept-Encoding": "gzip"}, json={
+        "model": LOCAL_MODEL, "stream": True, "max_tokens": 40, "temperature": 0,
+        "messages": [{"role": "user", "content": "Count from one to twenty in words."}],
+    }) as resp:
+        assert resp.status_code == 200
+        assert "content-encoding" not in resp.headers
+        for chunk in resp.iter_raw():
+            times.append(time.perf_counter())
+    assert len(times) > 5 and times[-1] - times[0] > 0.2
+
+
+def test_reset_password_ends_sessions_and_requires_a_new_password(api, admin_headers):
+    person, token = active_member(api, admin_headers)
+    time.sleep(1.1)  # tokens are timed to the second
+    resp = httpx.post(f"{api}/api/v1/admin/users/{person['id']}/reset-password", headers=admin_headers, timeout=30)
+    assert resp.status_code == 200, resp.text
+    assert httpx.get(f"{api}/api/v1/auth/me", headers=bearer(token), timeout=30).status_code == 401
+    assert login(api, person["email"], NEW_PASSWORD).status_code == 401
+    assert login(api, person["email"], resp.json()["temporary_password"]).json()["must_change_password"] is True
+
+
+def test_deactivating_stops_sessions_and_api_keys(api, admin_headers):
+    person, token = active_member(api, admin_headers)
+    key = httpx.post(f"{api}/api/v1/auth/api-keys", headers=bearer(token), json={"name": "k"}, timeout=30).json()["api_key"]
+    assert httpx.get(f"{api}/v1/models", headers=bearer(key), timeout=30).status_code == 200
+
+    resp = httpx.patch(f"{api}/api/v1/admin/users/{person['id']}", headers=admin_headers, json={"is_active": False}, timeout=30)
+    assert resp.status_code == 200, resp.text
+    assert httpx.get(f"{api}/api/v1/auth/me", headers=bearer(token), timeout=30).status_code == 401
+    assert httpx.get(f"{api}/v1/models", headers=bearer(key), timeout=30).status_code == 401
+    assert login(api, person["email"], NEW_PASSWORD).status_code == 403
+
+
+def test_admin_cannot_lock_themselves_out(api, admin_headers):
+    me = httpx.get(f"{api}/api/v1/auth/me", headers=admin_headers, timeout=30).json()
+    for change in ({"is_active": False}, {"role": "user"}):
+        resp = httpx.patch(f"{api}/api/v1/admin/users/{me['id']}", headers=admin_headers, json=change, timeout=30)
+        assert resp.status_code == 400, resp.text
+    assert httpx.post(f"{api}/api/v1/admin/users/{me['id']}/reset-password", headers=admin_headers, timeout=30).status_code == 400

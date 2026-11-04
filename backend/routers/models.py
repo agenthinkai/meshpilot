@@ -16,7 +16,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from core.config import settings
 from core.database import ModelFormat, ModelRecord, ModelStatus, QuantBits, User, get_db
-from core.security import get_current_user_api_key, get_current_user_jwt
+from core.security import get_current_user_api_key, get_current_user_jwt, require_admin
 from core.cpu_detect import get_cpu_profile
 from core.metrics import MODEL_UPLOAD_TOTAL, MODELS_LOADED
 
@@ -96,7 +96,7 @@ async def upload_model(
     name:        str        = Form(...),
     description: str        = Form(""),
     db:          AsyncSession = Depends(get_db),
-    user:        User         = Depends(get_current_user_jwt),
+    user:        User         = Depends(require_admin),
 ):
     # Tier model limits
     result = await db.execute(
