@@ -161,7 +161,7 @@ services:
   # Exists so the dashboard's Compare view can show a genuinely live
   # "without MeshPilot" response instead of a canned number. Pinned to a
   # separate cpuset from the api/onnx/worker group (0-3) and from dynamic
-  # llama.cpp instances (8-11, see core/model_orchestrator.py) so neither
+  # llama.cpp instances (8-19, see core/model_orchestrator.py) so neither
   # side of the comparison contends for the same cores.
   pytorch-baseline:
     build:

@@ -16,6 +16,7 @@ disk and registered, not that a llama-server process has them loaded.
 from __future__ import annotations
 
 import asyncio
+import os
 import time
 from datetime import datetime, timezone
 from typing import Optional
@@ -27,7 +28,7 @@ from sqlalchemy.exc import IntegrityError
 from core.config import settings
 from core.database import AsyncSessionLocal, InstanceStatus, ModelInstance, ModelRecord
 
-MAX_CONCURRENT_INSTANCES = 2
+MAX_CONCURRENT_INSTANCES = 3
 LLAMACPP_IMAGE = "meshpilot-llamacpp"
 MODEL_STORAGE_VOLUME = "meshpilot_model-storage"
 NETWORK_NAME = "meshpilot_default"
@@ -35,8 +36,9 @@ CONTAINER_PORT = 8080
 
 # Separate from the fixed cpuset ranges already claimed by api/onnx/worker
 # (0-3) and pytorch-baseline (4-7), so dynamic instances don't contend with
-# either for the same cores.
-DYNAMIC_CPUSET = "8-11"
+# either for the same cores. Each instance gets its own range: two instances
+# sharing one ran about 18 times slower than one alone.
+DYNAMIC_CPUSETS = ("8-11", "12-15", "16-19")
 
 # One slot gives a request the whole 4096-token context, instead of a quarter of
 # it. Documents matter more here than parallelism: an instance only has 4 threads
@@ -64,13 +66,32 @@ def container_name_for(model_id: str) -> str:
     return f"meshpilot-dyn-{model_id}"[:63]
 
 
-def _resource_limits(parameters_b: Optional[float]) -> tuple[str, int]:
-    """(cpuset, mem_limit_bytes), sized off the model's parameter count —
-    roughly 0.7GB per billion params at Q4 quantization, plus a flat 1GB for
-    the KV cache and runtime overhead."""
+def _memory_limit(parameters_b: Optional[float]) -> int:
+    """Bytes, sized off the model's parameter count — roughly 0.7GB per billion
+    params at Q4 quantization, plus a flat 1GB for the KV cache and runtime overhead."""
     params = parameters_b or 1.0
     mem_gb = max(1.0, params * 0.7 + 1.0)
-    return DYNAMIC_CPUSET, int(mem_gb * 1024 * 1024 * 1024)
+    return int(mem_gb * 1024 * 1024 * 1024)
+
+
+def choose_cpuset(in_use: set, cpu_count: int) -> str:
+    """The first range nothing else is using. A smaller server shares what it has."""
+    fits = [c for c in DYNAMIC_CPUSETS if int(c.split("-")[1]) < cpu_count]
+    if not fits:
+        return f"0-{cpu_count - 1}"
+    return next((c for c in fits if c not in in_use), fits[0])
+
+
+async def _claim_cpuset(model_id: str) -> str:
+    async with AsyncSessionLocal() as db:
+        instances = (await db.execute(select(ModelInstance))).scalars().all()
+        in_use = {i.cpuset for i in instances if i.model_id != model_id}
+        cpuset = choose_cpuset(in_use, os.cpu_count() or 1)
+        for instance in instances:
+            if instance.model_id == model_id:
+                instance.cpuset = cpuset
+        await db.commit()
+    return cpuset
 
 
 async def container_memory_mb(container_name: str) -> Optional[float]:
@@ -132,7 +153,6 @@ async def _create_and_start_container(client: httpx.AsyncClient, model: ModelRec
     if not model.file_path:
         raise RuntimeError(f"Model {model.id} has no file_path set")
     model_filename = model.file_path.rsplit("/", 1)[-1]
-    cpuset, mem_limit = _resource_limits(model.parameters_b)
 
     create_payload = {
         "Image": LLAMACPP_IMAGE,
@@ -147,8 +167,8 @@ async def _create_and_start_container(client: httpx.AsyncClient, model: ModelRec
             f"LLAMA_MODEL_FILE={model_filename}",
         ],
         "HostConfig": {
-            "CpusetCpus": cpuset,
-            "Memory": mem_limit,
+            "CpusetCpus": await _claim_cpuset(model.id),
+            "Memory": _memory_limit(model.parameters_b),
             "Binds": [f"{MODEL_STORAGE_VOLUME}:/models:ro"],
             "NetworkMode": NETWORK_NAME,
             "RestartPolicy": {"Name": "no"},

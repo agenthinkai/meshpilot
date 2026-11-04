@@ -219,6 +219,7 @@ class ModelInstance(Base):
     model_id       = Column(String(36), ForeignKey("model_records.id"), nullable=False, unique=True)
     container_name = Column(String(128), nullable=False)
     endpoint_url   = Column(String(255), nullable=False)
+    cpuset         = Column(String(32), nullable=True)
     status         = Column(Enum(InstanceStatus), default=InstanceStatus.STARTING, nullable=False)
     created_at     = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
     last_used_at   = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))

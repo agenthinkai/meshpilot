@@ -72,6 +72,25 @@ DEMO_MODELS = [
             "task":      "text-generation",
         },
     },
+    {
+        "id":            "allam-7b",
+        "name":          "ALLaM-7B-Instruct (Q4_K_M)",
+        "slug":          "allam-7b-instruct-q4",
+        "description":   "ALLaM 7B Instruct preview — INT4 quantized GGUF. The Arabic and English model.",
+        "format":        ModelFormat.GGUF,
+        "status":        ModelStatus.READY,
+        "quant_bits":    QuantBits.INT4,
+        "file_path":     "/models/ALLaM-AI_ALLaM-7B-Instruct-preview-Q4_K_M.gguf",
+        "context_length":4096,
+        "parameters_b":  7.0,
+        "backend":       "llamacpp",
+        "is_public":     True,
+        "metadata_":     {
+            "hf_repo":   "bartowski/ALLaM-AI_ALLaM-7B-Instruct-preview-GGUF",
+            "license":   "Apache 2.0",
+            "task":      "text-generation",
+        },
+    },
 ]
 
 
