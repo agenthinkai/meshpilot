@@ -8,7 +8,7 @@ const CHAT_MAX_TOKENS = 1024;
 // About 2,500 tokens of history, which leaves room to answer in a 4,096-token context.
 const CHAT_HISTORY_CHARS = 9000;
 const MAX_SAVED_CHATS = 50;
-const CHAT_QUEUE_NOTICE_MS = 6000;
+const CHAT_SLOW_START_MS = 8000;
 
 const CHAT_SUGGESTIONS = [
   ['Summarise a document', 'Summarise this document in five bullet points:\n\n'],
@@ -22,7 +22,7 @@ const chat = {
   activeId: null,
   models: [],
   controller: null,
-  queueTimer: null,
+  slowTimer: null,
   frame: null,
 };
 
@@ -143,7 +143,7 @@ function renderChatList() {
   document.getElementById('chatClearAll').style.display = chat.chats.length ? '' : 'none';
   items.innerHTML = chat.chats.map(c => `
     <div class="chat-item ${c.id === chat.activeId ? 'active' : ''}">
-      <button class="chat-item-open" type="button" onclick="openChat('${esc(c.id)}')">${esc(c.title)}</button>
+      <button class="chat-item-open" dir="auto" type="button" onclick="openChat('${esc(c.id)}')">${esc(c.title)}</button>
       <button class="chat-item-delete" type="button" aria-label="Delete chat" onclick="deleteChat('${esc(c.id)}')"><svg><use href="#i-trash"/></svg></button>
     </div>`).join('');
 }
@@ -182,18 +182,25 @@ function useSuggestion(index) {
 
 function renderMessage(message, isLast) {
   if (message.role === 'user') {
-    return `<div class="msg msg-user"><div class="msg-bubble">${esc(message.content)}</div>${
+    return `<div class="msg msg-user"><div class="msg-bubble" dir="auto">${esc(message.content)}</div>${
       message.trimmed ? '<div class="msg-notice">Older messages no longer fit, so the model can\'t see them. Start a new chat for a different topic.</div>' : ''
     }</div>`;
   }
   return `<div class="msg msg-assistant" ${isLast ? 'id="chatLastMessage"' : ''}>${renderAssistantBody(message, isLast)}</div>`;
 }
 
+function waitingText(message) {
+  if (message.ahead) {
+    return `${message.ahead} ${message.ahead === 1 ? 'request' : 'requests'} ahead of you. This model answers one at a time.`;
+  }
+  return message.slow ? 'Still working. The first words can take a while if the model has been idle.' : 'Thinking';
+}
+
 function renderAssistantBody(message, isLast) {
   const waiting = message.pending && !message.content;
   const body = waiting
-    ? `<div class="msg-waiting"><span class="dots"><i></i><i></i><i></i></span><span>${message.queued ? 'Waiting its turn. This model answers one request at a time.' : 'Thinking'}</span></div>`
-    : `<div class="msg-body">${renderMarkdown(message.content)}${message.pending ? '<span class="caret"></span>' : ''}</div>`;
+    ? `<div class="msg-waiting"><span class="dots"><i></i><i></i><i></i></span><span>${waitingText(message)}</span></div>`
+    : `<div class="msg-body" dir="auto">${renderMarkdown(message.content)}${message.pending ? '<span class="caret"></span>' : ''}</div>`;
   const error = message.error ? `
     <div class="msg-error" role="alert">
       <span>${esc(message.error)}</span>
@@ -390,12 +397,16 @@ async function streamReply(current) {
 
   chat.controller = new AbortController();
   updateComposerState();
-  chat.queueTimer = setTimeout(() => {
-    if (!reply.content) {
-      reply.queued = true;
-      updateLastMessage(reply);
-    }
-  }, CHAT_QUEUE_NOTICE_MS);
+  const watchForSlowStart = () => {
+    clearTimeout(chat.slowTimer);
+    chat.slowTimer = setTimeout(() => {
+      if (!reply.content) {
+        reply.slow = true;
+        updateLastMessage(reply);
+      }
+    }, CHAT_SLOW_START_MS);
+  };
+  watchForSlowStart();
 
   const started = performance.now();
   let firstToken = null;
@@ -431,6 +442,14 @@ async function streamReply(current) {
       buffer = events.pop();
       for (const event of events) {
         const line = event.trim();
+        const place = line.match(/^: queue ahead=(\d+)$/);
+        if (place) {
+          reply.ahead = Number(place[1]);
+          if (reply.ahead) clearTimeout(chat.slowTimer);
+          else watchForSlowStart();  // its turn has come, so the wait starts again
+          updateLastMessage(reply);
+          continue;
+        }
         if (!line.startsWith('data:')) continue;
         const payload = line.slice(5).trim();
         if (payload === '[DONE]') continue;
@@ -450,10 +469,11 @@ async function streamReply(current) {
     if (e.name === 'AbortError') reply.stopped = true;
     else reply.error = e instanceof TypeError ? 'Can\'t reach the server. Check your connection.' : e.message;
   } finally {
-    clearTimeout(chat.queueTimer);
+    clearTimeout(chat.slowTimer);
     chat.controller = null;
     delete reply.pending;
-    delete reply.queued;
+    delete reply.ahead;
+    delete reply.slow;
     if (reply.content && !reply.stopped && !reply.error) {
       const now = performance.now();
       const generating = firstToken === null ? 0 : (now - firstToken) / 1000;

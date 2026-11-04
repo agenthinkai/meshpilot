@@ -48,6 +48,7 @@ services:
       dockerfile: Dockerfile
     container_name: meshpilot-api
     environment:
+      - QUEUE_MAX_WAIT_S=${QUEUE_MAX_WAIT_S:-600}
       - DATABASE_URL=${DATABASE_URL:?Set DATABASE_URL in .env}
       - REDIS_URL=redis://redis:6379/0
       - MODEL_STORAGE=/models

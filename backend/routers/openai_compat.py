@@ -18,6 +18,7 @@ import asyncio
 import json
 import time
 import uuid
+from contextlib import aclosing
 from datetime import datetime, timezone
 from typing import AsyncIterator, Callable, List, Optional, Union
 
@@ -39,6 +40,7 @@ from core.metrics import (
 from core.model_orchestrator import PromptTooLong, ensure_model_running, fit_to_context
 from core.privacy import BLOCKED, CLOUD, MODEL_AUTO, MODEL_CLOUD, decide_route, messages_text, scan_text
 from core.ratelimit import enforce_user_rpm
+from core.request_queue import Ticket
 from core.security import get_openai_user
 
 router = APIRouter()
@@ -129,14 +131,101 @@ async def _record_inference(user: User, model: ModelRecord, result: dict) -> Non
         THROUGHPUT_TPS.labels(model_id=model.id, backend="llamacpp").set(result.get("throughput_tps") or 0)
 
 
+# Stays under nginx's 180s read timeout, because nothing can be sent while waiting.
+NON_STREAM_MAX_WAIT_S = 150
+QUEUE_POLL_S = 0.5
+QUEUE_KEEPALIVE_S = 10
+
+
 class _Upstream:
-    """One call to a llama-server or to the cloud provider."""
+    """One call to a llama-server or to the cloud provider. Calls to a local
+    model pass queue_model, and wait there for their turn."""
 
     def __init__(self, url: str, body: dict, headers: Optional[dict], on_finish: Callable[[dict], "asyncio.Future"],
-                 model_label: str, transform: Optional[Callable[[dict], dict]] = None):
+                 model_label: str, transform: Optional[Callable[[dict], dict]] = None,
+                 queue_model: Optional[str] = None):
         self.url, self.body, self.headers, self.on_finish = url, body, headers or {}, on_finish
         self.model_label, self.transform = model_label, transform
         self.started = time.perf_counter()
+        self.ticket = Ticket(queue_model) if queue_model else None
+        self.finished = False
+
+    async def _finish(self, result: dict) -> None:
+        if self.finished:
+            return
+        self.finished = True
+        if self.ticket:
+            await self.ticket.leave()
+        await self.on_finish(result)
+
+    async def _join_queue(self) -> int:
+        if not self.ticket:
+            return 0
+        await self.ticket.join()
+        return await self.ticket.requests_ahead()
+
+    async def _start_turn(self) -> None:
+        self.started = time.perf_counter()  # so speed figures leave out time spent waiting
+        if self.ticket:
+            await self.ticket.start_turn()
+
+    async def stream(self, client_wants_usage: bool) -> StreamingResponse:
+        ahead = await self._join_queue()
+        if ahead:
+            return StreamingResponse(self._wait_then_relay(ahead, client_wants_usage), **STREAM_RESPONSE)
+        await self._start_turn()
+        return await self.open_stream(client_wants_usage)
+
+    async def answer(self, request: Request) -> dict:
+        try:
+            ahead = await self._join_queue()
+            deadline = time.monotonic() + min(settings.QUEUE_MAX_WAIT_S, NON_STREAM_MAX_WAIT_S)
+            while ahead:
+                if await request.is_disconnected():
+                    await self._finish(self._result("failed", error="left the queue before its turn"))
+                    raise HTTPException(499, "The client disconnected")
+                if time.monotonic() > deadline:
+                    await self._finish(self._result("failed", error="gave up waiting in the queue"))
+                    raise HTTPException(503, "This model is busy. Try again shortly.", headers={"Retry-After": "30"})
+                await asyncio.sleep(QUEUE_POLL_S)
+                ahead = await self.ticket.requests_ahead()
+            await self._start_turn()
+            return await self.complete()
+        finally:
+            if self.ticket:
+                await self.ticket.leave()
+
+    async def _wait_then_relay(self, ahead: int, client_wants_usage: bool) -> AsyncIterator[str]:
+        """Places in line go out as SSE comments, which OpenAI clients ignore. They
+        also keep the connection open, however long the line is."""
+        deadline = time.monotonic() + settings.QUEUE_MAX_WAIT_S
+        told, told_at = None, 0.0
+        relaying = False
+        try:
+            while ahead:
+                if ahead != told or time.monotonic() - told_at >= QUEUE_KEEPALIVE_S:
+                    told, told_at = ahead, time.monotonic()
+                    yield f": queue ahead={ahead}\n\n"
+                if time.monotonic() > deadline:
+                    await self._finish(self._result("failed", error="gave up waiting in the queue"))
+                    yield _stream_error("This model is busy. Try again shortly.")
+                    return
+                await asyncio.sleep(QUEUE_POLL_S)
+                ahead = await self.ticket.requests_ahead()
+            yield ": queue ahead=0\n\n"
+            await self._start_turn()
+            try:
+                client, resp = await self._connect()
+            except HTTPException as e:
+                yield _stream_error(e.detail)
+                return
+            relaying = True
+            async with aclosing(self._relay(client, resp, client_wants_usage)) as chunks:
+                async for chunk in chunks:
+                    yield chunk
+        finally:
+            if not relaying:
+                _run_in_background(self._finish(self._result("failed", error="left the queue before its turn")))
 
     def _result(self, status: str, usage: Optional[dict] = None, error: Optional[str] = None,
                 ttft_ms: Optional[float] = None) -> dict:
@@ -154,7 +243,7 @@ class _Upstream:
         return httpx.Timeout(settings.INFERENCE_TIMEOUT_S, connect=10.0)
 
     async def _fail(self, error: Exception, status_code: int, message: str) -> HTTPException:
-        await self.on_finish(self._result("failed", error=str(error)[:500]))
+        await self._finish(self._result("failed", error=str(error)[:500]))
         return HTTPException(status_code, message)
 
     async def complete(self) -> dict:
@@ -168,19 +257,23 @@ class _Upstream:
                 data = self.transform(data)
         except httpx.HTTPError as e:
             raise await self._fail(e, 502, "The model server did not respond")
-        await self.on_finish(self._result("completed", data.get("usage")))
+        await self._finish(self._result("completed", data.get("usage")))
         return data
 
     async def _upstream_error(self, status_code: int, raw: str) -> HTTPException:
         # Client errors (too long a prompt, say) are the caller's to fix. Anything
         # else stays in the log, since provider errors can echo keys or internals.
-        await self.on_finish(self._result("failed", error=raw[:500]))
+        await self._finish(self._result("failed", error=raw[:500]))
         if status_code < 500 and status_code not in (401, 403, 429):
             return HTTPException(400, f"The model server rejected the request: {_error_message(raw)}")
         return HTTPException(502, "The model server returned an error")
 
     async def open_stream(self, client_wants_usage: bool) -> StreamingResponse:
         """Connects before responding, so upstream errors get a real status code."""
+        client, resp = await self._connect()
+        return StreamingResponse(self._relay(client, resp, client_wants_usage), **STREAM_RESPONSE)
+
+    async def _connect(self) -> tuple[httpx.AsyncClient, httpx.Response]:
         client = httpx.AsyncClient(timeout=self._timeout())
         try:
             request = client.build_request("POST", self.url, json=self.body, headers=self.headers)
@@ -193,10 +286,7 @@ class _Upstream:
             await resp.aclose()
             await client.aclose()
             raise await self._upstream_error(resp.status_code, raw)
-        return StreamingResponse(
-            self._relay(client, resp, client_wants_usage), media_type="text/event-stream",
-            headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
-        )
+        return client, resp
 
     async def _relay(self, client: httpx.AsyncClient, resp: httpx.Response, client_wants_usage: bool) -> AsyncIterator[str]:
         usage, ttft_ms, status, error, content_chunks = None, None, "failed", "stream ended early", 0
@@ -216,6 +306,8 @@ class _Upstream:
                 if self.transform:
                     chunk = self.transform(chunk)
                 usage = chunk.pop("usage", None) or usage
+                if self.ticket:
+                    await self.ticket.still_answering()
                 choices = chunk.get("choices") or []
                 if not choices:
                     continue
@@ -245,13 +337,22 @@ class _Upstream:
             await client.aclose()
             if usage is None and content_chunks:
                 usage = {"completion_tokens": content_chunks}
-            # Runs as its own task because a client disconnect cancels this generator.
-            task = asyncio.ensure_future(self.on_finish(self._result(status, usage, error, ttft_ms)))
-            _background_tasks.add(task)
-            task.add_done_callback(_background_tasks.discard)
+            _run_in_background(self._finish(self._result(status, usage, error, ttft_ms)))
 
 
 _background_tasks: set = set()
+STREAM_RESPONSE = {"media_type": "text/event-stream", "headers": {"Cache-Control": "no-cache", "X-Accel-Buffering": "no"}}
+
+
+def _run_in_background(coroutine) -> None:
+    # As its own task, because a client disconnect cancels the generator calling this.
+    task = asyncio.ensure_future(coroutine)
+    _background_tasks.add(task)
+    task.add_done_callback(_background_tasks.discard)
+
+
+def _stream_error(message: str) -> str:
+    return f"data: {json.dumps({'error': {'message': message, 'type': 'server_error'}})}\n\n"
 
 
 def _error_message(raw: str) -> str:
@@ -384,6 +485,7 @@ async def chat_completions(
     context = _audit_context(request, user, text)
 
     if decision.route == BLOCKED:
+        await db.commit()
         await audit.record_event(
             "inference.blocked", **context, route=BLOCKED, reason=decision.reason,
             sensitive=decision.sensitive, status="blocked",
@@ -397,6 +499,10 @@ async def chat_completions(
         wants_default = req.model in (MODEL_AUTO, MODEL_CLOUD)
         model = await _resolve_local_model(settings.LOCAL_DEFAULT_MODEL if wants_default else req.model, user, db)
         model_id, destination = model.id, "local"
+
+    # Gives the connection back rather than holding it through the wait and the answer.
+    # With many requests waiting, those still to be recorded would run out of connections.
+    await db.commit()
 
     # Recorded before any data moves. If this write fails the request fails too.
     await audit.record_event(
@@ -426,16 +532,16 @@ async def chat_completions(
         headers = None
 
     response_headers = _route_headers(decision.route, decision.reason, model_id)
-    upstream = _Upstream(url, body, headers, on_finish, model_id)
+    upstream = _Upstream(url, body, headers, on_finish, model_id, queue_model=model.id if model else None)
 
     if req.stream:
         body["stream"] = True
         body["stream_options"] = {"include_usage": True}
-        response = await upstream.open_stream(req.wants_stream_usage)
+        response = await upstream.stream(req.wants_stream_usage)
         response.headers.update(response_headers)
         return response
 
-    data = await upstream.complete()
+    data = await upstream.answer(request)
     data["model"] = model_id
     return JSONResponse(data, headers=response_headers)
 
@@ -460,6 +566,7 @@ async def completions(
     model_name = settings.LOCAL_DEFAULT_MODEL if req.model == MODEL_AUTO else req.model
     model = await _resolve_local_model(model_name, user, db)
     context = _audit_context(request, user, req.prompt)
+    await db.commit()  # as in chat_completions
     await audit.record_event(
         "inference.routed", **context, model_id=model.id, route="local", destination="local",
         reason="local model requested", sensitive=scan_text(req.prompt, policy.blocked_terms or []), status="routed",
@@ -485,15 +592,15 @@ async def completions(
     if req.stop:
         body["stop"] = [req.stop] if isinstance(req.stop, str) else req.stop
     upstream = _Upstream(f"{endpoint}/completion", body, None, on_finish, model.id,
-                         transform=_native_to_openai_completion(model.id, req.stream))
+                         transform=_native_to_openai_completion(model.id, req.stream), queue_model=model.id)
     headers = _route_headers("local", "local model requested", model.id)
 
     if req.stream:
         body["stream"] = True
-        response = await upstream.open_stream(req.wants_stream_usage)
+        response = await upstream.stream(req.wants_stream_usage)
         response.headers.update(headers)
         return response
 
-    data = await upstream.complete()
+    data = await upstream.answer(request)
     data["model"] = model.id
     return JSONResponse(data, headers=headers)

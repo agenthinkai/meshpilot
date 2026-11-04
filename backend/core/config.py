@@ -38,6 +38,7 @@ class Settings(BaseSettings):
     ONNX_URL: str = "http://onnx:8090"
     PYTORCH_BASELINE_URL: str = "http://pytorch-baseline:8091"
     INFERENCE_TIMEOUT_S: int = 120
+    QUEUE_MAX_WAIT_S: int = 600
     FIT_TIMEOUT_S: int = 7200
     # Only this proxy touches the Docker socket; see infra/docker-proxy/proxy.py.
     DOCKER_PROXY_URL: str = "http://docker-proxy:2375"

@@ -407,6 +407,7 @@ textarea.input-field { resize: vertical; line-height: 1.5; }
 .msg-notice { max-width: 82%; margin-top: 6px; font-size: 12.5px; color: var(--text-dim); text-align: right; }
 .msg-body { font-size: 15.5px; line-height: 1.62; overflow-wrap: anywhere; }
 .msg-body > * + * { margin-top: 11px; }
+.msg-body p, .msg-body li, .msg-body h1, .msg-body h2, .msg-body h3, .msg-body h4 { unicode-bidi: plaintext; }  /* each paragraph follows its own language */
 .msg-body h4 { font-size: 15.5px; font-weight: 600; margin-top: 18px; }
 .msg-body ul, .msg-body ol { padding-left: 22px; }
 .msg-body li + li { margin-top: 4px; }

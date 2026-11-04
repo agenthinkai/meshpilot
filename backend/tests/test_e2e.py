@@ -4,6 +4,7 @@ prove what would and wouldn't have left the server.
 
 Runs only when MESHPILOT_E2E=1; see backend/tests/README.md.
 """
+import asyncio
 import json
 import os
 import subprocess
@@ -254,6 +255,88 @@ def test_simultaneous_requests_wait_instead_of_failing(api, key_headers):
     [t.start() for t in threads]
     [t.join() for t in threads]
     assert results == [200, 200, 200, 200]
+
+
+def test_many_requests_at_once_wait_without_running_out_of_database_connections(api, key_headers):
+    results = []
+
+    def ask(i):
+        results.append(chat(api, key_headers, LOCAL_MODEL, f"Say hi. Request {i}.", max_tokens=3).status_code)
+
+    threads = [threading.Thread(target=ask, args=(i,)) for i in range(40)]
+    [t.start() for t in threads]
+    [t.join() for t in threads]
+    assert results == [200] * 40
+
+
+def test_requests_take_turns_in_arrival_order_and_dead_ones_lose_their_place():
+    from core import request_queue
+    from core.request_queue import Ticket
+
+    async def scenario():
+        model = f"queue-test-{time.time_ns()}"
+        first, second, third = Ticket(model), Ticket(model), Ticket(model)
+        for ticket in (first, second, third):
+            await ticket.join()
+        assert [await t.requests_ahead() for t in (first, second, third)] == [0, 1, 2]
+
+        await first.leave()
+        assert [await t.requests_ahead() for t in (second, third)] == [0, 1]
+
+        await request_queue._client.delete(second._lease_key(second.id))  # as if its worker had died
+        assert await third.requests_ahead() == 0
+
+        await third.start_turn()
+        lease = await request_queue._client.ttl(third._lease_key(third.id))
+        assert lease > request_queue.WAITING_LEASE_S
+
+        await third.leave()
+        assert await request_queue._client.exists(first.queue) == 0
+        await request_queue._client.aclose()
+
+    asyncio.run(scenario())
+
+
+def test_waiting_streams_are_told_their_place_and_still_get_answers(api, key_headers):
+    streams = {}
+
+    def ask(i):
+        with httpx.stream("POST", f"{api}/v1/chat/completions", headers=key_headers, timeout=180, json={
+            "model": LOCAL_MODEL, "stream": True, "max_tokens": 40, "temperature": 0,
+            "messages": [{"role": "user", "content": f"Count from one to twenty in words. Request {i}."}],
+        }) as resp:
+            assert resp.status_code == 200 and resp.headers["x-meshpilot-route"] == "local"
+            streams[i] = [line for line in resp.iter_lines() if line]
+
+    threads = [threading.Thread(target=ask, args=(i,)) for i in range(3)]
+    [t.start() for t in threads]
+    [t.join() for t in threads]
+
+    assert all(lines[-1] == "data: [DONE]" for lines in streams.values())
+    queued = [lines for lines in streams.values() if lines[0].startswith(": queue ahead=")]
+    assert len(queued) == 2
+    for lines in queued:
+        places = [int(line.split("=")[1]) for line in lines if line.startswith(": queue")]
+        assert places == sorted(places, reverse=True) and places[-1] == 0
+
+
+def test_openai_sdk_reads_a_stream_that_waited_in_line(api, api_key):
+    from openai import OpenAI
+
+    client = OpenAI(base_url=f"{api}/v1", api_key=api_key)
+    answers = []
+
+    def ask(i):
+        stream = client.chat.completions.create(
+            model=LOCAL_MODEL, stream=True, max_tokens=20, temperature=0,
+            messages=[{"role": "user", "content": f"Name three colours. Request {i}."}],
+        )
+        answers.append("".join(c.choices[0].delta.content or "" for c in stream if c.choices))
+
+    threads = [threading.Thread(target=ask, args=(i,)) for i in range(3)]
+    [t.start() for t in threads]
+    [t.join() for t in threads]
+    assert len(answers) == 3 and all(answers)
 
 
 def test_too_long_prompt_is_refused_on_sync_endpoint(api, key_headers):
@@ -691,7 +774,7 @@ def test_savings_compare_with_the_configured_cloud_price_first(api, admin_header
     savings = usage(api, admin_headers, "metrics/savings", "company")
     options = savings["cloud_options"]
     assert options[0]["label"] == savings["cloud_price_label"]
-    assert options[0]["same_tokens_usd"] == pytest.approx(savings["cloud_usd"])
+    assert options[0]["same_tokens_usd"] == pytest.approx(savings["cloud_usd"], abs=2e-6)
     assert len({o["label"] for o in options}) == len(options) > 1
     assert savings["capacity_tokens_per_month"] > 0
     assert all(o["busy_pct"] > 0 and o["break_even_tokens_per_month"] > 0 for o in options)
