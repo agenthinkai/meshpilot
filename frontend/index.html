@@ -12,6 +12,7 @@
       <symbol id="i-logo" viewBox="0 0 24 24"><path d="M12 2.5 20.5 7v10L12 21.5 3.5 17V7z" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round"/><path d="M12 12 3.8 7.2M12 12l8.2-4.8M12 12v9.2" fill="none" stroke="currentColor" stroke-width="1.6"/><circle cx="12" cy="12" r="2.2" fill="currentColor"/></symbol>
       <symbol id="i-chat" viewBox="0 0 24 24"><path d="M20 14.5a2.5 2.5 0 0 1-2.5 2.5H9l-5 4V6.5A2.5 2.5 0 0 1 6.5 4h11A2.5 2.5 0 0 1 20 6.5z" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round"/></symbol>
       <symbol id="i-overview" viewBox="0 0 24 24"><path d="M4 20V10M10 20V4M16 20v-7M21 20H3" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/></symbol>
+      <symbol id="i-document" viewBox="0 0 24 24"><path d="M6 3h8l5 5v13H6zM14 3v5h5M9 13h7M9 17h7" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round"/></symbol>
       <symbol id="i-play" viewBox="0 0 24 24"><path d="M7 4.5v15l12-7.5z" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round"/></symbol>
       <symbol id="i-model" viewBox="0 0 24 24"><path d="M12 3 21 8l-9 5-9-5zM3 12.5l9 5 9-5M3 17l9 5 9-5" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round"/></symbol>
       <symbol id="i-target" viewBox="0 0 24 24"><circle cx="12" cy="12" r="8.5" fill="none" stroke="currentColor" stroke-width="1.6"/><circle cx="12" cy="12" r="3.5" fill="none" stroke="currentColor" stroke-width="1.6"/></symbol>
@@ -38,6 +39,7 @@
     <div class="nav-scroll">
       <ul class="nav-links">
         <li><a href="#chat" class="nav-link" data-page="chat"><svg class="nav-icon"><use href="#i-chat"/></svg><span class="nav-label">Chat</span></a></li>
+        <li><a href="#documents" class="nav-link" data-page="documents"><svg class="nav-icon"><use href="#i-document"/></svg><span class="nav-label">Documents</span></a></li>
       </ul>
       <div class="nav-group admin-only">Administration</div>
       <ul class="nav-links admin-only">
@@ -176,6 +178,42 @@
       </details>
     </div>
 
+    <!-- ── Documents ───────────────────────────────────────────────────────── -->
+    <div id="page-documents" class="page" style="display:none">
+      <div class="page-header">
+        <div><h2>Documents</h2><p class="header-sub"><span id="docCount">Answers come only from these documents, on this server</span></p></div>
+      </div>
+
+      <div class="section-card">
+        <label class="field">
+          <span>Your question, in English or Arabic</span>
+          <textarea id="docQuestion" class="input-field" rows="2" dir="auto" onkeydown="if (event.key === 'Enter' &amp;&amp; !event.shiftKey) { event.preventDefault(); askDocuments(); }"></textarea>
+        </label>
+        <div class="doc-ask-row">
+          <button class="btn-primary" id="docAskBtn" type="button" onclick="askDocuments()">Ask</button>
+          <label class="model-picker"><span class="sr-only">Model</span><select id="docModel"></select></label>
+        </div>
+        <div id="docResult" class="doc-result" hidden>
+          <div id="docAnswer"></div>
+          <div id="docSources" hidden></div>
+          <p class="doc-note">Answers can be wrong, so check them against these passages.</p>
+        </div>
+      </div>
+
+      <div class="section-card admin-only">
+        <div class="doc-library-head">
+          <h3>Library</h3>
+          <label class="btn-secondary"><svg class="btn-icon"><use href="#i-plus"/></svg> Add documents
+            <input type="file" class="sr-only" accept=".pdf,.docx,.txt,.md" multiple onchange="uploadDocuments(this)" /></label>
+        </div>
+        <p class="doc-note">PDF, Word (.docx) or text, up to 25 MB each. Everyone who can sign in can ask questions answered from these documents.</p>
+        <div class="table-scroll"><table class="data-table">
+          <thead><tr><th>Document</th><th>Passages</th><th>Added</th><th></th></tr></thead>
+          <tbody id="documentsBody"><tr><td colspan="4" class="empty-cell">Loading…</td></tr></tbody>
+        </table></div>
+      </div>
+    </div>
+
     <!-- ── People ────────────────────────────────────────────────────────── -->
     <div id="page-people" class="page" style="display:none">
       <div class="page-header">
@@ -217,7 +255,7 @@
             <input type="range" id="maxTokens" min="64" max="2048" value="150"
               oninput="document.getElementById('maxTokensVal').textContent=this.value" />
           </div>
-          <div class="param-group">
+          <div class="param-group" id="temperatureGroup">
             <label>Temperature <span id="tempVal">0.7</span></label>
             <input type="range" id="temperature" min="0" max="2" step="0.1" value="0.7"
               oninput="document.getElementById('tempVal').textContent=this.value" />
@@ -242,6 +280,19 @@
 
         <!-- Compare mode -->
         <div id="compareArea" style="display:none">
+          <div class="compare-grid">
+            <div class="response-area compare-panel" id="withPanel">
+              <div class="response-header"><span>With MeshPilot</span><span class="compare-clock" id="withClock"></span></div>
+              <pre class="response-text response-text-clipped" id="withText"></pre>
+              <button class="expand-toggle" id="withExpandBtn" type="button" onclick="toggleExpand('with')" style="display:none">Show full response</button>
+            </div>
+            <div class="response-area compare-panel" id="withoutPanel">
+              <div class="response-header"><span>Plain PyTorch</span><span class="compare-clock" id="withoutClock"></span></div>
+              <pre class="response-text response-text-clipped" id="withoutText"></pre>
+              <button class="expand-toggle" id="withoutExpandBtn" type="button" onclick="toggleExpand('without')" style="display:none">Show full response</button>
+            </div>
+          </div>
+
           <div class="speedup-banner" id="speedupBanner" style="display:none"></div>
 
           <div class="stat-cards" id="statCards" style="display:none">
@@ -301,23 +352,11 @@
             </div>
           </div>
 
-          <div class="savings-block">
+          <div class="savings-block" id="compareSavings" style="display:none">
             <div class="chart-label">Running totals <span class="chart-hint">all comparison runs so far</span></div>
             <div id="savingsCompare"></div>
           </div>
 
-          <div class="compare-grid">
-            <div class="response-area compare-panel" id="withPanel">
-              <div class="response-header"><span>With MeshPilot</span></div>
-              <pre class="response-text response-text-clipped" id="withText"></pre>
-              <button class="expand-toggle" id="withExpandBtn" type="button" onclick="toggleExpand('with')" style="display:none">Show full response</button>
-            </div>
-            <div class="response-area compare-panel" id="withoutPanel">
-              <div class="response-header"><span>Plain PyTorch</span></div>
-              <pre class="response-text response-text-clipped" id="withoutText"></pre>
-              <button class="expand-toggle" id="withoutExpandBtn" type="button" onclick="toggleExpand('without')" style="display:none">Show full response</button>
-            </div>
-          </div>
         </div>
       </div>
     </div>
@@ -534,6 +573,7 @@ curl .../api/v1/inference/tasks/xyz789 -H "X-API-Key: mp_..."
   <script src="/static/js/app.js"></script>
   <script src="/static/js/platform.js"></script>
   <script src="/static/js/chat.js"></script>
+  <script src="/static/js/documents.js"></script>
   <script src="/static/js/people.js"></script>
 </body>
 </html>

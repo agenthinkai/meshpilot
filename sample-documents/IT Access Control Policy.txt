@@ -1,0 +1,16 @@
+Sample Bank: IT Access Control Policy
+
+Section 1: Passwords
+Staff passwords must have at least 14 characters and must be changed every 90 days. The last 10 passwords cannot be reused.
+
+Section 2: Multi-factor authentication
+Multi-factor authentication is required for all remote access and for all administrator accounts.
+
+Section 3: Access reviews
+Managers review their team's system access every 6 months. Access for employees who leave is removed on their last working day.
+
+Section 4: Audit logs
+Access logs for core banking systems are kept for 2 years and reviewed by Information Security each month.
+
+Section 5: External sharing
+Staff must not upload customer data to external websites or public AI services.

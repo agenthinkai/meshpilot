@@ -14,7 +14,7 @@ let state = {
 };
 
 const ADMIN_PAGES = ['dashboard', 'people', 'models', 'governance', 'fit', 'demo'];
-const MEMBER_PAGES = ['chat', 'apikeys', 'docs'];
+const MEMBER_PAGES = ['chat', 'documents', 'apikeys', 'docs'];
 const savingsShown = {};
 
 // ── Init ──────────────────────────────────────────────────────────────────
@@ -70,6 +70,7 @@ function navigateTo(page) {
   // Load data for the page
   if (page === 'dashboard') loadDashboard();
   else if (page === 'chat') loadChatPage();
+  else if (page === 'documents') loadDocumentsPage();
   else if (page === 'people') loadPeople();
   else if (page === 'models') loadModels();
   else if (page === 'apikeys') loadAPIKeys();
@@ -459,6 +460,8 @@ function updateCompareAvailability() {
 
 function onCompareToggle() {
   const compare = document.getElementById('compareMode').checked;
+  // Compare always runs at temperature 0, so both sides are a fair match.
+  document.getElementById('temperatureGroup').hidden = compare;
   document.getElementById('responseArea').style.display = 'none';
   document.getElementById('compareArea').style.display = 'none';
 }
@@ -549,85 +552,142 @@ function toggleExpand(which) {
   btn.textContent = nowExpanded ? 'Show less' : 'Show full response';
 }
 
+const COMPARE_SIDES = {
+  with_meshpilot: { text: 'withText', clock: 'withClock' },
+  without_meshpilot: { text: 'withoutText', clock: 'withoutClock' },
+};
+
+function setCompareClock(side, label, finished = false) {
+  const clock = document.getElementById(COMPARE_SIDES[side].clock);
+  clock.textContent = label;
+  clock.classList.toggle('done', finished);
+}
+
+function showCompareSide(side, result, isFirst) {
+  setupClip(COMPARE_SIDES[side].text, result.error ? `Error: ${result.error}` : (result.text || '(empty response)'));
+  setCompareClock(side, result.error ? 'Failed' : `${isFirst ? 'Answered first, in' : 'Answered in'} ${fmtSeconds(result.wall_clock_ms)}`, !result.error);
+}
+
+function showCompareResults(data) {
+  const w = data.with_meshpilot || {};
+  const wo = data.without_meshpilot || {};
+
+  if (!w.error && !wo.error) {
+    // Stat cards
+    document.getElementById('statWithLatency').textContent = fmtSeconds(w.wall_clock_ms);
+    document.getElementById('statWithTps').textContent = `${w.throughput_tps} tok/s · ${w.completion_tokens} tokens`;
+    document.getElementById('statWithoutLatency').textContent = fmtSeconds(wo.wall_clock_ms);
+    document.getElementById('statWithoutTps').textContent = `${wo.throughput_tps} tok/s · ${wo.completion_tokens} tokens`;
+    document.getElementById('statWithMem').textContent = fmtMem(w.memory_mb) ? `${fmtMem(w.memory_mb)} RAM, live` : '';
+    document.getElementById('statWithoutMem').textContent = fmtMem(wo.memory_mb) ? `${fmtMem(wo.memory_mb)} RAM, live` : '';
+    document.getElementById('statCards').style.display = 'grid';
+
+    // Bar charts (width % relative to the larger of the two values)
+    const maxLatency = Math.max(w.wall_clock_ms, wo.wall_clock_ms) || 1;
+    const maxTps = Math.max(w.throughput_tps, wo.throughput_tps) || 1;
+    document.getElementById('chartBlock').style.display = 'block';
+    // Reset to 0 first so the width transition animates on every run
+    const barIds = ['barLatencyWith', 'barLatencyWithout', 'barTpsWith', 'barTpsWithout'];
+    const hasMemory = w.memory_mb != null && wo.memory_mb != null;
+    document.getElementById('memoryChartRow').style.display = hasMemory ? 'block' : 'none';
+    if (hasMemory) barIds.push('barMemWith', 'barMemWithout');
+    barIds.forEach(id => { document.getElementById(id).style.width = '0%'; });
+
+    requestAnimationFrame(() => {
+      document.getElementById('barLatencyWith').style.width = `${(w.wall_clock_ms / maxLatency) * 100}%`;
+      document.getElementById('barLatencyWithout').style.width = `${(wo.wall_clock_ms / maxLatency) * 100}%`;
+      document.getElementById('barTpsWith').style.width = `${(w.throughput_tps / maxTps) * 100}%`;
+      document.getElementById('barTpsWithout').style.width = `${(wo.throughput_tps / maxTps) * 100}%`;
+      if (hasMemory) {
+        const maxMem = Math.max(w.memory_mb, wo.memory_mb) || 1;
+        document.getElementById('barMemWith').style.width = `${(w.memory_mb / maxMem) * 100}%`;
+        document.getElementById('barMemWithout').style.width = `${(wo.memory_mb / maxMem) * 100}%`;
+      }
+    });
+    document.getElementById('barLatencyWithVal').textContent = fmtSeconds(w.wall_clock_ms);
+    document.getElementById('barLatencyWithoutVal').textContent = fmtSeconds(wo.wall_clock_ms);
+    document.getElementById('barTpsWithVal').textContent = `${w.throughput_tps} t/s`;
+    document.getElementById('barTpsWithoutVal').textContent = `${wo.throughput_tps} t/s`;
+    if (hasMemory) {
+      document.getElementById('barMemWithVal').textContent = fmtMem(w.memory_mb);
+      document.getElementById('barMemWithoutVal').textContent = fmtMem(wo.memory_mb);
+    }
+  }
+
+  if (data.speedup_x) {
+    const banner = document.getElementById('speedupBanner');
+    let text = `MeshPilot was ${data.speedup_x}x faster`;
+    if (data.memory_reduction_pct) text += ` and used ${data.memory_reduction_pct}% less memory`;
+    text += `. Same model, same prompt, same machine.`;
+    banner.textContent = text;
+    banner.style.display = 'block';
+  }
+}
+
 async function runCompare(modelId, headers, body) {
   document.getElementById('compareArea').style.display = 'block';
-  document.getElementById('speedupBanner').style.display = 'none';
-  document.getElementById('statCards').style.display = 'none';
-  document.getElementById('chartBlock').style.display = 'none';
-  document.getElementById('withText').textContent = 'running…';
-  document.getElementById('withoutText').textContent = 'running… (plain PyTorch is much slower — this is expected)';
-  document.getElementById('withExpandBtn').style.display = 'none';
-  document.getElementById('withoutExpandBtn').style.display = 'none';
+  ['speedupBanner', 'statCards', 'chartBlock', 'compareSavings', 'withExpandBtn', 'withoutExpandBtn'].forEach(id => {
+    document.getElementById(id).style.display = 'none';
+  });
+  const waiting = new Set(Object.keys(COMPARE_SIDES));
+  waiting.forEach(side => {
+    setupClip(COMPARE_SIDES[side].text, 'Waiting for the answer…');
+    setCompareClock(side, 'Getting the model ready…');
+  });
+
+  let startedAt = null;
+  const timer = setInterval(() => {
+    if (startedAt === null) return;
+    const elapsed = ((performance.now() - startedAt) / 1000).toFixed(1);
+    waiting.forEach(side => setCompareClock(side, `Working… ${elapsed}s`));
+  }, 100);
 
   try {
-    const resp = await fetch(`${API}/api/v1/inference/compare/${modelId}`, {
+    const resp = await fetch(`${API}/api/v1/inference/compare/${modelId}/stream`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', ...headers },
       body,
     });
-    const data = await resp.json();
-    if (!resp.ok) throw new Error(data.detail || resp.statusText);
+    if (!resp.ok) {
+      const data = await resp.json().catch(() => ({}));
+      throw new Error(data.detail || resp.statusText);
+    }
 
-    const w = data.with_meshpilot || {};
-    const wo = data.without_meshpilot || {};
-
-    setupClip('withText', w.error ? `Error: ${w.error}` : (w.text || '(empty response)'));
-    setupClip('withoutText', wo.error ? `Error: ${wo.error}` : (wo.text || '(empty response)'));
-
-    if (!w.error && !wo.error) {
-      // Stat cards
-      document.getElementById('statWithLatency').textContent = fmtSeconds(w.wall_clock_ms);
-      document.getElementById('statWithTps').textContent = `${w.throughput_tps} tok/s · ${w.completion_tokens} tokens`;
-      document.getElementById('statWithoutLatency').textContent = fmtSeconds(wo.wall_clock_ms);
-      document.getElementById('statWithoutTps').textContent = `${wo.throughput_tps} tok/s · ${wo.completion_tokens} tokens`;
-      document.getElementById('statWithMem').textContent = fmtMem(w.memory_mb) ? `${fmtMem(w.memory_mb)} RAM, live` : '';
-      document.getElementById('statWithoutMem').textContent = fmtMem(wo.memory_mb) ? `${fmtMem(wo.memory_mb)} RAM, live` : '';
-      document.getElementById('statCards').style.display = 'grid';
-
-      // Bar charts (width % relative to the larger of the two values)
-      const maxLatency = Math.max(w.wall_clock_ms, wo.wall_clock_ms) || 1;
-      const maxTps = Math.max(w.throughput_tps, wo.throughput_tps) || 1;
-      document.getElementById('chartBlock').style.display = 'block';
-      // Reset to 0 first so the width transition animates on every run
-      const barIds = ['barLatencyWith', 'barLatencyWithout', 'barTpsWith', 'barTpsWithout'];
-      const hasMemory = w.memory_mb != null && wo.memory_mb != null;
-      document.getElementById('memoryChartRow').style.display = hasMemory ? 'block' : 'none';
-      if (hasMemory) barIds.push('barMemWith', 'barMemWithout');
-      barIds.forEach(id => { document.getElementById(id).style.width = '0%'; });
-
-      requestAnimationFrame(() => {
-        document.getElementById('barLatencyWith').style.width = `${(w.wall_clock_ms / maxLatency) * 100}%`;
-        document.getElementById('barLatencyWithout').style.width = `${(wo.wall_clock_ms / maxLatency) * 100}%`;
-        document.getElementById('barTpsWith').style.width = `${(w.throughput_tps / maxTps) * 100}%`;
-        document.getElementById('barTpsWithout').style.width = `${(wo.throughput_tps / maxTps) * 100}%`;
-        if (hasMemory) {
-          const maxMem = Math.max(w.memory_mb, wo.memory_mb) || 1;
-          document.getElementById('barMemWith').style.width = `${(w.memory_mb / maxMem) * 100}%`;
-          document.getElementById('barMemWithout').style.width = `${(wo.memory_mb / maxMem) * 100}%`;
+    const reader = resp.body.getReader();
+    const decoder = new TextDecoder();
+    let buffer = '';
+    let finished = false;
+    for (;;) {
+      const { value, done } = await reader.read();
+      if (done) break;
+      buffer += decoder.decode(value, { stream: true });
+      const events = buffer.split('\n\n');
+      buffer = events.pop();
+      for (const raw of events) {
+        if (!raw.startsWith('data:')) continue;
+        const event = JSON.parse(raw.slice(5));
+        if (event.event === 'started') {
+          startedAt = performance.now();
+        } else if (event.event === 'side') {
+          const isFirst = waiting.size === Object.keys(COMPARE_SIDES).length;
+          waiting.delete(event.side);
+          showCompareSide(event.side, event.result, isFirst);
+        } else if (event.event === 'done') {
+          finished = true;
+          showCompareResults(event);
         }
-      });
-      document.getElementById('barLatencyWithVal').textContent = fmtSeconds(w.wall_clock_ms);
-      document.getElementById('barLatencyWithoutVal').textContent = fmtSeconds(wo.wall_clock_ms);
-      document.getElementById('barTpsWithVal').textContent = `${w.throughput_tps} t/s`;
-      document.getElementById('barTpsWithoutVal').textContent = `${wo.throughput_tps} t/s`;
-      if (hasMemory) {
-        document.getElementById('barMemWithVal').textContent = fmtMem(w.memory_mb);
-        document.getElementById('barMemWithoutVal').textContent = fmtMem(wo.memory_mb);
       }
     }
-
-    if (data.speedup_x) {
-      const banner = document.getElementById('speedupBanner');
-      let text = `MeshPilot was ${data.speedup_x}x faster`;
-      if (data.memory_reduction_pct) text += ` and used ${data.memory_reduction_pct}% less memory`;
-      text += `. Same model, same prompt, same machine.`;
-      banner.textContent = text;
-      banner.style.display = 'block';
-    }
+    if (!finished) throw new Error('The comparison stopped before it finished.');
+    document.getElementById('compareSavings').style.display = 'block';
     await loadSavings('savingsCompare');
   } catch (e) {
-    setupClip('withText', `Error: ${e.message}`);
-    setupClip('withoutText', '');
+    waiting.forEach(side => {
+      setupClip(COMPARE_SIDES[side].text, `Error: ${e.message}`);
+      setCompareClock(side, 'Failed');
+    });
+  } finally {
+    clearInterval(timer);
   }
 }
 

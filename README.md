@@ -93,12 +93,17 @@ llama.cpp model   llama.cpp model   Optional cloud API
 | Prometheus + Grafana | Monitoring |
 | PyTorch baseline | The "without MeshPilot" side of Compare (Qwen only) |
 | ONNX runtime | ONNX-format models, not available through `/v1` |
+| Document reader | Reads uploaded documents and makes their search data |
 
 Chat history stays in each person's browser. Prompts are not stored on the server.
 
 Each model answers one request at a time, on its own CPU range. Up to three models
 run at once. Model files must be in the model volume, at the top level: a model whose
 file is missing refuses to start rather than loading another one.
+
+Document search needs `multilingual-e5-small` in its own folder in the model volume,
+holding `model.onnx` and `tokenizer.json`. The Documents page answers from uploaded
+documents, and `sample-documents/` has a fictional set for demonstrations.
 
 ### CPU Optimization Stack
 

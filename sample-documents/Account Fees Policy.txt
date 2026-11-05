@@ -1,0 +1,16 @@
+Sample Bank: Account Fees Policy
+
+Section 1: Opening an account
+Opening a current account requires a minimum deposit of EGP 5,000. Opening a savings account requires a minimum deposit of EGP 1,000.
+
+Section 2: Monthly fees
+The monthly management fee on a current account is EGP 25. The fee is waived for accounts with an average monthly balance above EGP 100,000. Savings accounts have no monthly fee.
+
+Section 3: Statements
+Electronic statements are free. A printed statement costs EGP 20 per page.
+
+Section 4: Dormant accounts
+An account with no customer transactions for 12 months becomes dormant. A dormant account can only be reactivated at a branch, with the customer's national ID. No fee applies for reactivation.
+
+Section 5: Closing an account
+A customer can close an account at any time after settling all obligations. There is no closing fee after the account has been open for 6 months. Closing it sooner costs EGP 100.

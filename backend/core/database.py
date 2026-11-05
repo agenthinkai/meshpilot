@@ -206,6 +206,32 @@ class InferenceLog(Base):
     )
 
 
+class Document(Base):
+    """An uploaded document. The file itself isn't kept, only its text."""
+    __tablename__ = "documents"
+
+    id          = Column(String(36), primary_key=True, default=lambda: str(uuid.uuid4()))
+    title       = Column(String(255), nullable=False)
+    filename    = Column(String(255), nullable=False)
+    uploaded_by = Column(String(36), ForeignKey("users.id"), nullable=True)
+    chunk_count = Column(Integer, nullable=False, default=0)
+    created_at  = Column(DateTime(timezone=True), nullable=False, default=lambda: datetime.now(timezone.utc))
+
+
+class DocumentChunk(Base):
+    __tablename__ = "document_chunks"
+
+    id          = Column(String(36), primary_key=True, default=lambda: str(uuid.uuid4()))
+    document_id = Column(String(36), ForeignKey("documents.id"), nullable=False)
+    position    = Column(Integer, nullable=False)
+    section     = Column(String(255), nullable=True)
+    page        = Column(Integer, nullable=True)
+    text        = Column(Text, nullable=False)
+    embedding   = Column(JSON, nullable=False)
+
+    __table_args__ = (Index("ix_document_chunks_document", "document_id"),)
+
+
 class ModelInstance(Base):
     """Tracks which ModelRecord is actually loaded in a live llama.cpp
     container right now — the missing link that let two models both show

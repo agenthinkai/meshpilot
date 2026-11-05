@@ -1,0 +1,16 @@
+Sample Bank: Mobile and Online Transfers Policy
+
+Section 1: Transfer limits
+Mobile transfers are limited to EGP 30,000 per day. A customer can raise the limit to EGP 100,000 per day with written approval from their branch.
+
+Section 2: Timing
+Transfers between accounts at Sample Bank are immediate. Transfers to other banks in Egypt arrive by the next working day.
+
+Section 3: Fees
+Transfers between accounts at Sample Bank are free. Transfers to other banks in Egypt cost EGP 10 each.
+
+Section 4: Failed transfers
+If money leaves an account but does not reach the recipient, the customer should report it within 30 days. The bank investigates and returns the money within 7 working days if the transfer has failed.
+
+Section 5: Security
+Each transfer needs a one-time code sent to the customer's registered mobile number. Three wrong codes lock mobile banking for 24 hours.

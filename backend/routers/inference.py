@@ -11,13 +11,16 @@ Endpoints:
 from __future__ import annotations
 
 import asyncio
+import json
 import time
 import uuid
+from contextlib import aclosing
 from datetime import datetime, timezone
-from typing import List, Optional
+from typing import AsyncIterator, List, Optional
 
 import httpx
 from fastapi import APIRouter, Depends, HTTPException
+from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
 from sqlalchemy import select, desc
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -25,7 +28,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from core import audit
 from core.config import settings
 from core.database import (
-    CompareRun, InferenceLog, InferenceStatus, ModelRecord, ModelStatus, PrivacyPolicy, User, get_db,
+    AsyncSessionLocal, CompareRun, InferenceLog, InferenceStatus, ModelRecord, ModelStatus, PrivacyPolicy, User, get_db,
 )
 from core.model_orchestrator import container_memory_mb, container_name_for, ensure_model_running, fit_to_context
 from core.net_safety import UnsafeURL, ensure_public_url
@@ -256,17 +259,11 @@ async def infer_sync(
 
 # ── Compare endpoint ("with MeshPilot" vs "without MeshPilot") ────────────────
 
-@router.post("/compare/{model_id}")
-async def infer_compare(
-    model_id: str,
-    req:      InferenceRequest,
-    db:       AsyncSession = Depends(get_db),
-    user:     User         = Depends(get_current_user),
-):
-    """Runs the SAME model two ways and returns both: through MeshPilot
-    (llama.cpp, INT4 GGUF) and through plain PyTorch (FP32, no MeshPilot).
-    Both calls fire concurrently so neither side waits on the other. Temperature
-    is forced to 0 because the baseline always generates greedily."""
+COMPARE_KEEPALIVE_S = 10
+_background_tasks: set = set()
+
+
+async def _start_compare(model_id: str, req: InferenceRequest, db: AsyncSession, user: User) -> tuple:
     if model_id not in COMPARE_PROMPT_TEMPLATES:
         raise HTTPException(
             400,
@@ -275,11 +272,21 @@ async def infer_compare(
         )
     model = await _get_ready_model(model_id, user, db)
     audit_context = await _audit_routed(db, user, model.id, req.prompt)
+    await db.commit()  # the comparison outlives this session when it's streamed
     req = req.model_copy(update={
         "prompt": COMPARE_PROMPT_TEMPLATES[model_id].replace("{prompt}", req.prompt),
         "temperature": 0.0,
     })
+    return model, req, audit_context
 
+
+async def _compare_events(model: ModelRecord, req: InferenceRequest, audit_context: dict,
+                          user_id: str) -> AsyncIterator[Optional[dict]]:
+    """Runs the SAME model two ways: through MeshPilot (llama.cpp, INT4 GGUF) and
+    through plain PyTorch (FP32, no MeshPilot). Both calls fire concurrently so
+    neither side waits on the other. Temperature is forced to 0 because the
+    baseline always generates greedily. Yields each side as it finishes, then
+    the comparison last, and None while nothing has changed for a while."""
     # Finish any cold start first, so the memory sample below finds a container
     # and both sides begin generating together. A failure here resurfaces as
     # the "with" side's error when _run_inference retries it.
@@ -288,23 +295,16 @@ async def infer_compare(
     except Exception:
         pass
 
-    async def _with_meshpilot():
-        t0 = time.perf_counter()
-        try:
-            result = await _run_inference(model, req)
-            result["wall_clock_ms"] = round((time.perf_counter() - t0) * 1000, 1)
-            return result
-        except Exception as e:
-            return {"error": str(e)}
+    yield {"event": "started"}
 
-    async def _without_meshpilot():
+    async def _timed(side: str, call) -> tuple[str, dict]:
         t0 = time.perf_counter()
         try:
-            result = await _call_pytorch_baseline(req)
+            result = await call
             result["wall_clock_ms"] = round((time.perf_counter() - t0) * 1000, 1)
-            return result
+            return side, result
         except Exception as e:
-            return {"error": str(e)}
+            return side, {"error": str(e)}
 
     async def _sample_memory():
         # Give generation a moment to actually start before sampling, so this
@@ -315,60 +315,123 @@ async def infer_compare(
             container_memory_mb("meshpilot-pytorch-baseline"),
         )
 
-    (with_result, without_result), (with_mem_mb, without_mem_mb) = await asyncio.gather(
-        asyncio.gather(_with_meshpilot(), _without_meshpilot()),
-        _sample_memory(),
-    )
-
-    if with_mem_mb is not None:
-        with_result["memory_mb"] = with_mem_mb
-    if without_mem_mb is not None:
-        without_result["memory_mb"] = without_mem_mb
-
-    # Tokens per second, not total response time: the two sides can stop at
-    # different token counts, which would otherwise distort the ratio.
-    speedup = None
-    if with_result.get("throughput_tps") and without_result.get("throughput_tps"):
-        speedup = round(with_result["throughput_tps"] / without_result["throughput_tps"], 2)
-
-    memory_reduction_pct = None
-    if with_result.get("memory_mb") and without_result.get("memory_mb"):
-        memory_reduction_pct = round(
-            (1 - with_result["memory_mb"] / without_result["memory_mb"]) * 100, 1
-        )
-
-    if "error" not in with_result and "error" not in without_result:
-        db.add(CompareRun(
-            user_id=user.id, model_id=model_id,
-            mesh_prompt_tokens=with_result["prompt_tokens"],
-            mesh_completion_tokens=with_result["completion_tokens"],
-            mesh_latency_ms=with_result["latency_ms"],
-            mesh_memory_mb=with_mem_mb,
-            baseline_prompt_tokens=without_result["prompt_tokens"],
-            baseline_completion_tokens=without_result["completion_tokens"],
-            baseline_latency_ms=without_result["latency_ms"],
-            baseline_memory_mb=without_mem_mb,
-        ))
-        # Commit now: the page reloads its savings totals as soon as this returns.
-        await db.commit()
-
-    INFERENCE_REQUESTS_TOTAL.labels(model_id=model_id, backend="compare", status="success").inc()
-
-    compare_ok = "error" not in with_result and "error" not in without_result
-    await audit.record_event(
-        "inference.completed" if compare_ok else "inference.failed", **audit_context,
-        status="completed" if compare_ok else "failed",
-        prompt_tokens=with_result.get("prompt_tokens"), completion_tokens=with_result.get("completion_tokens"),
-        detail={"endpoint": "compare"},
-    )
-
-    return {
-        "model_id": model_id,
-        "with_meshpilot": with_result,
-        "without_meshpilot": without_result,
-        "speedup_x": speedup,
-        "memory_reduction_pct": memory_reduction_pct,
+    memory = asyncio.ensure_future(_sample_memory())
+    pending = {
+        asyncio.ensure_future(_timed("with_meshpilot", _run_inference(model, req))),
+        asyncio.ensure_future(_timed("without_meshpilot", _call_pytorch_baseline(req))),
     }
+    results = {}
+    finished = False
+    try:
+        while pending:
+            done, pending = await asyncio.wait(pending, timeout=COMPARE_KEEPALIVE_S, return_when=asyncio.FIRST_COMPLETED)
+            if not done:
+                yield None
+            # Finishing during the same wait still goes out fastest first.
+            for side, result in sorted((task.result() for task in done), key=lambda r: r[1].get("wall_clock_ms", 0)):
+                results[side] = result
+                yield {"event": "side", "side": side, "result": result}
+
+        with_result, without_result = results["with_meshpilot"], results["without_meshpilot"]
+        with_mem_mb, without_mem_mb = await memory
+
+        if with_mem_mb is not None:
+            with_result["memory_mb"] = with_mem_mb
+        if without_mem_mb is not None:
+            without_result["memory_mb"] = without_mem_mb
+
+        # Tokens per second, not total response time: the two sides can stop at
+        # different token counts, which would otherwise distort the ratio.
+        speedup = None
+        if with_result.get("throughput_tps") and without_result.get("throughput_tps"):
+            speedup = round(with_result["throughput_tps"] / without_result["throughput_tps"], 2)
+
+        memory_reduction_pct = None
+        if with_result.get("memory_mb") and without_result.get("memory_mb"):
+            memory_reduction_pct = round(
+                (1 - with_result["memory_mb"] / without_result["memory_mb"]) * 100, 1
+            )
+
+        compare_ok = "error" not in with_result and "error" not in without_result
+        if compare_ok:
+            # Commit now: the page reloads its savings totals as soon as this returns.
+            async with AsyncSessionLocal() as db:
+                db.add(CompareRun(
+                    user_id=user_id, model_id=model.id,
+                    mesh_prompt_tokens=with_result["prompt_tokens"],
+                    mesh_completion_tokens=with_result["completion_tokens"],
+                    mesh_latency_ms=with_result["latency_ms"],
+                    mesh_memory_mb=with_mem_mb,
+                    baseline_prompt_tokens=without_result["prompt_tokens"],
+                    baseline_completion_tokens=without_result["completion_tokens"],
+                    baseline_latency_ms=without_result["latency_ms"],
+                    baseline_memory_mb=without_mem_mb,
+                ))
+                await db.commit()
+
+        INFERENCE_REQUESTS_TOTAL.labels(model_id=model.id, backend="compare", status="success").inc()
+
+        await audit.record_event(
+            "inference.completed" if compare_ok else "inference.failed", **audit_context,
+            status="completed" if compare_ok else "failed",
+            prompt_tokens=with_result.get("prompt_tokens"), completion_tokens=with_result.get("completion_tokens"),
+            detail={"endpoint": "compare"},
+        )
+        finished = True
+
+        yield {
+            "event": "done",
+            "model_id": model.id,
+            "with_meshpilot": with_result,
+            "without_meshpilot": without_result,
+            "speedup_x": speedup,
+            "memory_reduction_pct": memory_reduction_pct,
+        }
+    finally:
+        for task in (*pending, memory):
+            task.cancel()
+        if not finished:
+            # As its own task, because a client disconnect cancels this generator.
+            task = asyncio.ensure_future(audit.record_event(
+                "inference.failed", **audit_context, status="failed", reason="client left before the comparison finished",
+                detail={"endpoint": "compare"},
+            ))
+            _background_tasks.add(task)
+            task.add_done_callback(_background_tasks.discard)
+
+
+@router.post("/compare/{model_id}")
+async def infer_compare(
+    model_id: str,
+    req:      InferenceRequest,
+    db:       AsyncSession = Depends(get_db),
+    user:     User         = Depends(get_current_user),
+):
+    model, req, audit_context = await _start_compare(model_id, req, db, user)
+    async for event in _compare_events(model, req, audit_context, user.id):
+        if event and event["event"] == "done":
+            return {k: v for k, v in event.items() if k != "event"}
+
+
+@router.post("/compare/{model_id}/stream")
+async def infer_compare_stream(
+    model_id: str,
+    req:      InferenceRequest,
+    db:       AsyncSession = Depends(get_db),
+    user:     User         = Depends(get_current_user),
+):
+    """The same comparison as server-sent events, so a page can show the faster
+    side's answer as soon as it exists."""
+    model, req, audit_context = await _start_compare(model_id, req, db, user)
+    user_id = user.id
+
+    async def stream():
+        async with aclosing(_compare_events(model, req, audit_context, user_id)) as events:
+            async for event in events:
+                yield ": keepalive\n\n" if event is None else f"data: {json.dumps(event)}\n\n"
+
+    return StreamingResponse(stream(), media_type="text/event-stream",
+                             headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"})
 
 
 # ── Async endpoint ────────────────────────────────────────────────────────────

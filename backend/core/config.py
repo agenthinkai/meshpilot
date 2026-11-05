@@ -39,6 +39,8 @@ class Settings(BaseSettings):
     PYTORCH_BASELINE_URL: str = "http://pytorch-baseline:8091"
     INFERENCE_TIMEOUT_S: int = 120
     QUEUE_MAX_WAIT_S: int = 600
+    EMBEDDER_URL: str = "http://embedder:8095"
+    DOCUMENTS_DEFAULT_MODEL: str = "allam-7b"
     FIT_TIMEOUT_S: int = 7200
     # Only this proxy touches the Docker socket; see infra/docker-proxy/proxy.py.
     DOCKER_PROXY_URL: str = "http://docker-proxy:2375"

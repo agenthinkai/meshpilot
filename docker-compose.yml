@@ -156,6 +156,30 @@ services:
     cpuset: "0-3"
     mem_limit: "1g"          # was 10g
 
+  # ── Document reader ──────────────────────────────────────────────────────────
+  # Extracts text from uploads and makes search vectors. Not published to the
+  # host, and only reachable from other containers.
+  embedder:
+    build:
+      context: ./infra/embedder
+      dockerfile: Dockerfile
+    container_name: meshpilot-embedder
+    environment:
+      - EMBEDDER_MODEL_DIR=/models/multilingual-e5-small
+      - EMBEDDER_THREADS=2
+    volumes:
+      - model-storage:/models:ro
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8095/health')"]
+      interval: 30s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+    restart: unless-stopped
+    logging: *default-logging
+    cpuset: "0-3"
+    mem_limit: "1g"
+
   # ── PyTorch Baseline ("without MeshPilot") ─────────────────────────────────
   # Plain transformers/PyTorch CPU inference, no quantization, no llama.cpp.
   # Exists so the dashboard's Compare view can show a genuinely live

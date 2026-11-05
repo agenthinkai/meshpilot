@@ -1,0 +1,16 @@
+Sample Bank: Cards Policy
+
+Section 1: Issuing a debit card
+A debit card is issued free of charge with every current account. New cards are ready for collection at the branch within 7 working days.
+
+Section 2: Replacement cards
+A replacement card costs EGP 150 and is issued within 5 working days. There is no fee when the old card has expired or is damaged through no fault of the customer.
+
+Section 3: Lost or stolen cards
+Customers must report a lost or stolen card immediately through the contact centre on 19000, which is open 24 hours. The bank blocks the card as soon as the report is received. The customer is not liable for transactions made after the report.
+
+Section 4: Cards retained by an ATM
+A card retained by an ATM is returned to the branch that owns the machine within 2 working days. The customer collects it from that branch with their national ID. A retained card that is not collected within 30 days is destroyed.
+
+Section 5: Card limits
+The daily ATM withdrawal limit is EGP 20,000. The daily limit for card purchases is EGP 50,000. A customer can ask a branch to lower these limits at any time.

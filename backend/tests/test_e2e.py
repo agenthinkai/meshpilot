@@ -780,6 +780,125 @@ def test_savings_compare_with_the_configured_cloud_price_first(api, admin_header
     assert all(o["busy_pct"] > 0 and o["break_even_tokens_per_month"] > 0 for o in options)
 
 
+def test_compare_shows_each_side_as_it_finishes(api, admin_headers):
+    runs_before = usage(api, admin_headers, "metrics/savings", "mine")["compare_runs"]
+    events = []
+    with httpx.stream("POST", f"{api}/api/v1/inference/compare/{LOCAL_MODEL}/stream", timeout=180,
+                      headers={**admin_headers, "Accept-Encoding": "gzip"},
+                      json={"prompt": "Name three colours.", "max_tokens": 16}) as resp:
+        assert resp.status_code == 200 and "content-encoding" not in resp.headers
+        for line in resp.iter_lines():
+            if line.startswith("data:"):
+                events.append((time.perf_counter(), json.loads(line[5:])))
+
+    assert [e["event"] for _, e in events] == ["started", "side", "side", "done"]
+    (first_at, first), (second_at, second) = events[1], events[2]
+    assert first["side"] == "with_meshpilot" and second["side"] == "without_meshpilot"
+    assert second_at - first_at > 0.5  # the faster answer really arrived first
+    assert first["result"]["text"] and second["result"]["text"]
+
+    done = events[3][1]
+    assert done["with_meshpilot"]["text"] == first["result"]["text"]
+    assert done["with_meshpilot"]["memory_mb"] and done["without_meshpilot"]["memory_mb"]
+    assert done["speedup_x"] > 1
+    assert usage(api, admin_headers, "metrics/savings", "mine")["compare_runs"] == runs_before + 1
+
+
+def test_compare_without_streaming_still_returns_the_whole_comparison(api, admin_headers):
+    resp = httpx.post(f"{api}/api/v1/inference/compare/{LOCAL_MODEL}", headers=admin_headers, timeout=180,
+                      json={"prompt": "Name three colours.", "max_tokens": 8})
+    assert resp.status_code == 200, resp.text
+    data = resp.json()
+    assert "event" not in data and data["model_id"] == LOCAL_MODEL
+    assert data["with_meshpilot"]["text"] and data["without_meshpilot"]["text"]
+
+
+def test_compare_stream_refuses_a_model_with_no_baseline(api, admin_headers):
+    resp = httpx.post(f"{api}/api/v1/inference/compare/benchmark-mistral-7b/stream", headers=admin_headers,
+                      timeout=30, json={"prompt": "Hi", "max_tokens": 4})
+    assert resp.status_code == 400 and "baseline" in resp.json()["detail"]
+
+
+def upload_document(api, headers, name, text):
+    return httpx.post(f"{api}/api/v1/documents", headers=headers, timeout=120,
+                      files={"file": (name, text.encode("utf-8"), "text/plain")})
+
+
+def ask_documents(api, headers, question, model=LOCAL_MODEL):
+    events, answer = [], ""
+    with httpx.stream("POST", f"{api}/api/v1/documents/ask/stream", headers={**headers, "Accept-Encoding": "gzip"},
+                      timeout=180, json={"question": question, "model": model}) as resp:
+        assert resp.status_code == 200, resp.read()
+        assert "content-encoding" not in resp.headers
+        for line in resp.iter_lines():
+            if line.startswith("data:") and line != "data: [DONE]":
+                event = json.loads(line[5:])
+                events.append(event)
+                for choice in event.get("choices") or []:
+                    answer += choice["delta"].get("content") or ""
+    return events[0], answer
+
+
+DOCUMENT_TEXT = """E2E Policy
+
+Section 1: Lost cards
+A lost card must be reported on 12345, which is open every day.
+
+Section 2: Replacement cards
+A replacement card costs EGP 777 and takes 9 working days.
+"""
+
+
+def test_documents_answer_questions_with_their_sources_and_only_admins_upload(api, admin_headers):
+    uploaded = upload_document(api, admin_headers, "E2E Policy.txt", DOCUMENT_TEXT)
+    assert uploaded.status_code == 201, uploaded.text
+    document = uploaded.json()
+    assert document["title"] == "E2E Policy" and document["chunk_count"] >= 2
+
+    _, token = active_member(api, admin_headers)
+    member = bearer(token)
+    assert upload_document(api, member, "Nope.txt", "Section 1: Nope\nNope.").status_code == 403
+    assert httpx.delete(f"{api}/api/v1/documents/{document['id']}", headers=member, timeout=30).status_code == 403
+    assert any(d["id"] == document["id"] for d in httpx.get(f"{api}/api/v1/documents", headers=member, timeout=30).json())
+
+    first, answer = ask_documents(api, member, "How much does a replacement card cost?")
+    assert first["not_found"] is False
+    assert any(s["section"] == "Section 2: Replacement cards" and "777" in s["text"] for s in first["sources"])
+    assert "embedding" not in first["sources"][0]
+    assert "777" in answer
+
+    usage_rows = usage(api, member, "metrics/dashboard", "mine")
+    assert usage_rows["total_requests"] == 1
+
+    first, answer = ask_documents(api, member, "What is the capital of Australia and who designed its parliament?")
+    assert first == {"sources": [], "not_found": True} and answer == ""
+
+    assert httpx.delete(f"{api}/api/v1/documents/{document['id']}", headers=admin_headers, timeout=30).status_code == 204
+    first, _ = ask_documents(api, member, "How much does a replacement card cost?")
+    assert first["not_found"] is True
+
+
+def test_document_questions_are_audited_without_their_text(api, admin_headers):
+    uploaded = upload_document(api, admin_headers, "Audit Policy.txt", DOCUMENT_TEXT)
+    secret = "How much does a replacement card cost for marmalade customers?"
+    ask_documents(api, admin_headers, secret)
+    resp = httpx.get(f"{api}/api/v1/governance/audit/events", headers=admin_headers, params={"limit": 200}, timeout=30)
+    assert "marmalade" not in resp.text
+    assert "document.uploaded" in resp.text
+    httpx.delete(f"{api}/api/v1/documents/{uploaded.json()['id']}", headers=admin_headers, timeout=30)
+
+
+@pytest.mark.parametrize("name,content,status", [
+    ("virus.exe", b"MZ", 400),
+    ("empty.txt", b"   ", 422),
+    ("broken.pdf", b"not really a pdf", 422),
+    ("broken.docx", b"not really a word file", 422),
+])
+def test_files_that_cannot_be_read_are_refused(api, admin_headers, name, content, status):
+    resp = httpx.post(f"{api}/api/v1/documents", headers=admin_headers, timeout=60, files={"file": (name, content)})
+    assert resp.status_code == status, resp.text
+
+
 def test_cloud_requests_do_not_count_as_kept_on_premises(api, admin_headers, key_headers):
     set_policy(api, admin_headers, cloud_enabled=True)
     try:

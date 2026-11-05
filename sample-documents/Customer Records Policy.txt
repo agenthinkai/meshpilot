@@ -1,0 +1,16 @@
+Sample Bank: Customer Records Policy
+
+Section 1: Updating customer details
+Customers must update their details every 3 years. The bank sends a reminder 60 days before the deadline.
+
+Section 2: Accounts with out-of-date details
+If details are not updated by the deadline, the bank can temporarily suspend the account until they are updated.
+
+Section 3: Documents required
+An update requires a valid national ID and proof of address dated within the last 3 months.
+
+Section 4: Keeping records
+Transaction records are kept for 10 years from the date the account is closed. Identity documents are kept for the same period.
+
+Section 5: Sharing customer data
+Customer data is not shared with third parties without the customer's written consent, unless the law requires it.

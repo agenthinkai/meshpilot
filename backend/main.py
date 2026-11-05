@@ -23,7 +23,7 @@ from starlette.exceptions import HTTPException as StarletteHTTPException
 from core.config import settings
 from core.metrics import REGISTRY
 from core.startup_checks import enforce_secure_settings
-from routers import auth, models, inference, admin, metrics as metrics_router, openai_compat, governance, fit
+from routers import auth, models, inference, admin, metrics as metrics_router, openai_compat, governance, fit, documents
 
 logger = structlog.get_logger()
 
@@ -61,7 +61,7 @@ app = FastAPI(
 class GZipExceptStreams(GZipMiddleware):
     # Compressing a stream would hold back its tokens until the answer is finished.
     async def __call__(self, scope, receive, send):
-        if scope["type"] == "http" and scope["path"].startswith("/v1/"):
+        if scope["type"] == "http" and (scope["path"].startswith("/v1/") or scope["path"].endswith("/stream")):
             await self.app(scope, receive, send)
             return
         await super().__call__(scope, receive, send)
@@ -107,6 +107,7 @@ app.include_router(admin.router,      prefix="/api/v1/admin",     tags=["Admin"]
 app.include_router(metrics_router.router, prefix="/api/v1/metrics", tags=["Metrics"])
 app.include_router(governance.router, prefix="/api/v1/governance", tags=["Privacy & Audit"])
 app.include_router(fit.router,        prefix="/api/v1/fit",       tags=["Fit Report"])
+app.include_router(documents.router,  prefix="/api/v1/documents", tags=["Documents"])
 app.include_router(openai_compat.router, prefix="/v1",            tags=["OpenAI-compatible"])
 
 # ── Health & root ─────────────────────────────────────────────────────────────
